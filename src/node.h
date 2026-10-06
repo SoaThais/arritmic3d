@@ -26,6 +26,8 @@ template <typename ActionPotentialModel, typename ConductionVelocityModel>
 class BasicTissue;
 template <typename ActionPotentialModel, typename ConductionVelocityModel>
 class CardiacTissue;
+template <typename ActionPotentialModel, typename ConductionVelocityModel>
+class LegacyHeapPropagation;
 
 enum NodeDataId
 {
@@ -57,8 +59,9 @@ public:
 
     using CellEvent = Event<NodeT>;
 
-    friend class CardiacTissue<ActionPotentialModel,ConductionVelocityModel>;
-    friend class BasicTissue<ActionPotentialModel,ConductionVelocityModel>;
+    friend class CardiacTissue<ActionPotentialModel, ConductionVelocityModel>;
+    friend class BasicTissue<ActionPotentialModel, ConductionVelocityModel>;
+    friend class LegacyHeapPropagation<ActionPotentialModel, ConductionVelocityModel>;
 
     /// State of the cell.
     enum class CellActivationState : char { INACTIVE = 0, WAITING_FOR_ACTIVATION, ACTIVE };

@@ -19,6 +19,7 @@
 #include "error.h"
 #include "basic_tissue.h"
 #include "system_event_scheduler.h"
+#include "legacy_heap_propagation.h"
 
 using std::vector;
 
@@ -33,8 +34,11 @@ template <typename APM,typename CVM>
 class CardiacTissue : public BasicTissue<APM,CVM>
 {
 public:
+
     using CellEvent = Event<NodeT<APM,CVM> >;
     using Node = NodeT<APM,CVM>;
+
+    LegacyHeapPropagation<APM,CVM> propagation_solver;
 
     CardiacTissue(int size_x_, int size_y_, int size_z_, float dx_, float dy_, float dz_) :
                 BasicTissue<APM,CVM>(size_x_, size_y_, size_z_, dx_, dy_, dz_) {}
@@ -47,6 +51,9 @@ public:
     void SetLongAPDReactivation(bool val) { long_apd_reactivation = val; }
 
 private:
+
+    friend class LegacyHeapPropagation<APM,CVM>;
+
     bool long_apd_reactivation = false;
     float apd_plateau_duration = 0.8; // Percentage of APD considered as plateau for reactivation
     float apd_variation = 0.0;
@@ -253,174 +260,177 @@ void CardiacTissue<APM,CVM>::ExternalActivation(const vector<size_t> & node_ids,
  * From Node.pde: dispara_evento
 */
 template <typename APM,typename CVM>
-void CardiacTissue<APM,CVM>::TriggerEvent(CellEvent* ev)
-{
-    Node * node_ = ev->cell_node;
+void CardiacTissue<APM,CVM>::TriggerEvent(CellEvent* ev) {
 
-    // Time must match
-    LOG::Warning(ev->event_time != this->tissue_time, "TriggerEvent(): In node ", node_->id,
-            "Event time mismatch. Event time is ", ev->event_time, " while current time is ", this->tissue_time );
+    propagation_solver.ProcessEvent(*this, ev);
 
-    // Activation
-    if ( this->tissue_time == node_->next_activation_time )
-    {
-        // Safety factor
-        if ( ! node_->external_activation && node_->received_potential < node_->parameters->min_potential*node_->parameters->safety_factor)
-        {
-            // No activation. Potential too low
-            LOG::Info(true, "TriggerEvent(): Safety factor acting. Node ", node_->id, " NOT activated with total potential ", node_->received_potential,
-                 " does not reach the minimum: ", node_->parameters->min_potential);
+    // Node * node_ = ev->cell_node;
 
-            // Deactivate the node. There are situations where this is not correct as more potentials sent to the node may activate it, but this is the behaviour of pde version.
-            node_->received_potential = 0.0;    // @todo Check
-            node_->next_activation_time = MAX_TIME;
-        }
-        else
-        {
-            /// @todo Missing reentry checks
-            // The Node is activated.
-            if (node_->Activate(this->tissue_time, this))
-            {
-                // Once activated and computed the APD, we set the next deactivation event
-                node_->next_deactivation_event->ChangeEvent(node_->next_deactivation_time);
-                this->event_queue.InsertCellEvent(node_->next_deactivation_event); // @todo Check
+    // // Time must match
+    // LOG::Warning(ev->event_time != this->tissue_time, "TriggerEvent(): In node ", node_->id,
+    //         "Event time mismatch. Event time is ", ev->event_time, " while current time is ", this->tissue_time );
 
-                // We accumulate the variations
-                apd_variation += node_->apd_model.getDeltaAPD();
+    // // Activation
+    // if ( this->tissue_time == node_->next_activation_time )
+    // {
+    //     // Safety factor
+    //     if ( ! node_->external_activation && node_->received_potential < node_->parameters->min_potential*node_->parameters->safety_factor)
+    //     {
+    //         // No activation. Potential too low
+    //         LOG::Info(true, "TriggerEvent(): Safety factor acting. Node ", node_->id, " NOT activated with total potential ", node_->received_potential,
+    //              " does not reach the minimum: ", node_->parameters->min_potential);
 
-                // The potential is sent to inactive neighbours.
-                vector<Node*> inactive_neighs;
-                for (unsigned int i = 0; i < this->tissue_geometry.num_neighbours; ++i )
-                {
-                    // We get the neighbour node
-                    // Danger! May go out of the array of Node
-                    Node* neigh = this->NodeDisplace(node_, this->tissue_geometry.displacement[i]);
-                    if(neigh == nullptr)    // We are in a void node, we skip it
-                        continue;
-                    assert(neigh >= this->tissue_nodes.data() && neigh < this->tissue_nodes.data() + this->tissue_nodes.size());
+    //         // Deactivate the node. There are situations where this is not correct as more potentials sent to the node may activate it, but this is the behaviour of pde version.
+    //         node_->received_potential = 0.0;    // @todo Check
+    //         node_->next_activation_time = MAX_TIME;
+    //     }
+    //     else
+    //     {
+    //         /// @todo Missing reentry checks
+    //         // The Node is activated.
+    //         if (node_->Activate(this->tissue_time, this))
+    //         {
+    //             // Once activated and computed the APD, we set the next deactivation event
+    //             node_->next_deactivation_event->ChangeEvent(node_->next_deactivation_time);
+    //             this->event_queue.InsertCellEvent(node_->next_deactivation_event); // @todo Check
 
-                    // We skip void nodes
-                    if ( neigh->type == CELL_TYPE_VOID )
-                    {
-                        continue;
-                    }
+    //             // We accumulate the variations
+    //             apd_variation += node_->apd_model.getDeltaAPD();
 
-                    float distance = this->tissue_geometry.distance_to_neighbour[i];
-                    Vector3 activation_dir = - this->tissue_geometry.relative_position[i]; // @todo Maybe we should define the opposite direction in geometry
+    //             // The potential is sent to inactive neighbours.
+    //             vector<Node*> inactive_neighs;
+    //             for (unsigned int i = 0; i < this->tissue_geometry.num_neighbours; ++i )
+    //             {
+    //                 // We get the neighbour node
+    //                 // Danger! May go out of the array of Node
+    //                 Node* neigh = this->NodeDisplace(node_, this->tissue_geometry.displacement[i]);
+    //                 if(neigh == nullptr)    // We are in a void node, we skip it
+    //                     continue;
+    //                 assert(neigh >= this->tissue_nodes.data() && neigh < this->tissue_nodes.data() + this->tissue_nodes.size());
 
-                    // We compute the direct diffusion, through the graph.
-                    float direct_vel = node_->ComputeDirectionalConductionVelocity(activation_dir);
-                    float direct_activation_time = node_->local_activation_time + distance/direct_vel;
+    //                 // We skip void nodes
+    //                 if ( neigh->type == CELL_TYPE_VOID )
+    //                 {
+    //                     continue;
+    //                 }
 
-                    if (neigh->GetState(this->tissue_time) == Node::CellActivationState::ACTIVE) // direct_activation_time
-                    { // AQUI: lanzar y depurar las ecuaciones // Nodos 137-> 249
-                        // We validate the activation times with the conduction velocities
-                        // If the neighbour is active, perhaps it activated us
-                        // If it activated us, its activation time cannot be earlier than
-                        // our activation time less the longest travel time.
-                        // 1. We compute the max travel time from neigh towards us.
-                        float neigh_min_vel = neigh->parameters->cond_veloc_transversal_reduction*neigh->conduction_vel;
-                        float max_travel_time = distance/neigh_min_vel;
-                        // 2. We compute the earliest activation time if neigh activated us.
-                        float neigh_earliest_possible_activation = node_->local_activation_time - max_travel_time;
-                        // 3. If the neighbour activated before this threshold, it could not have activate us.
-                        // Otherwise, we assume it could have activated us and skip this neigh.
-                        if(neigh->local_activation_time > neigh_earliest_possible_activation)
-                        {
-                            // LOG::Info(true, "From ", node_->id, " to ", neigh->id, " ->·<- neigh: ", neigh->local_activation_time, " newer than ", neigh_earliest_possible_activation);
-                            // LOG::Info(true, "    Target node ", neigh->id, " could have activated node ", node_->id, ". We skip it to prevent turnover.");
-                            continue;
-                        }
+    //                 float distance = this->tissue_geometry.distance_to_neighbour[i];
+    //                 Vector3 activation_dir = - this->tissue_geometry.relative_position[i]; // @todo Maybe we should define the opposite direction in geometry
 
-                    }
+    //                 // We compute the direct diffusion, through the graph.
+    //                 float direct_vel = node_->ComputeDirectionalConductionVelocity(activation_dir);
+    //                 float direct_activation_time = node_->local_activation_time + distance/direct_vel;
 
-                    CellEvent * ev_neigh = neigh->ScheduleActivation(node_, direct_activation_time);
+    //                 if (neigh->GetState(this->tissue_time) == Node::CellActivationState::ACTIVE) // direct_activation_time
+    //                 { // AQUI: lanzar y depurar las ecuaciones // Nodos 137-> 249
+    //                     // We validate the activation times with the conduction velocities
+    //                     // If the neighbour is active, perhaps it activated us
+    //                     // If it activated us, its activation time cannot be earlier than
+    //                     // our activation time less the longest travel time.
+    //                     // 1. We compute the max travel time from neigh towards us.
+    //                     float neigh_min_vel = neigh->parameters->cond_veloc_transversal_reduction*neigh->conduction_vel;
+    //                     float max_travel_time = distance/neigh_min_vel;
+    //                     // 2. We compute the earliest activation time if neigh activated us.
+    //                     float neigh_earliest_possible_activation = node_->local_activation_time - max_travel_time;
+    //                     // 3. If the neighbour activated before this threshold, it could not have activate us.
+    //                     // Otherwise, we assume it could have activated us and skip this neigh.
+    //                     if(neigh->local_activation_time > neigh_earliest_possible_activation)
+    //                     {
+    //                         // LOG::Info(true, "From ", node_->id, " to ", neigh->id, " ->·<- neigh: ", neigh->local_activation_time, " newer than ", neigh_earliest_possible_activation);
+    //                         // LOG::Info(true, "    Target node ", neigh->id, " could have activated node ", node_->id, ". We skip it to prevent turnover.");
+    //                         continue;
+    //                     }
 
-                    // if ev_neigh is nullptr means it is active and rejected activation or it has an earlier activation time
-                    if (ev_neigh != nullptr)
-                    {
-                        this->event_queue.InsertCellEvent(ev_neigh);
-                        inactive_neighs.push_back(neigh); // @todo Maybe it should include nodes with earlier activation time
-                    }
-                }
+    //                 }
 
-                if (inactive_neighs.size() > 0)
-                {
-                    float potential_to_send = node_->received_potential/inactive_neighs.size()*node_->parameters->safety_factor;
-                    for (auto neigh : inactive_neighs)
-                        neigh->received_potential += potential_to_send;
-                }
+    //                 CellEvent * ev_neigh = neigh->ScheduleActivation(node_, direct_activation_time);
 
-            }
-            node_->next_activation_time = MAX_TIME;
-        }
-    }
+    //                 // if ev_neigh is nullptr means it is active and rejected activation or it has an earlier activation time
+    //                 if (ev_neigh != nullptr)
+    //                 {
+    //                     this->event_queue.InsertCellEvent(ev_neigh);
+    //                     inactive_neighs.push_back(neigh); // @todo Maybe it should include nodes with earlier activation time
+    //                 }
+    //             }
 
-    if( this->tissue_time == node_->next_deactivation_time)
-    {
-        // Deactivate node
-        node_->received_potential = 0.0;
-        node_->external_activation = false;
-        node_->next_deactivation_time = MAX_TIME;
+    //             if (inactive_neighs.size() > 0)
+    //             {
+    //                 float potential_to_send = node_->received_potential/inactive_neighs.size()*node_->parameters->safety_factor;
+    //                 for (auto neigh : inactive_neighs)
+    //                     neigh->received_potential += potential_to_send;
+    //             }
 
-        if (node_->next_activation_time < MAX_TIME)
-        {
-            node_->next_activation_event->ChangeEvent(node_->next_activation_time);
-            this->event_queue.InsertCellEvent(node_->next_activation_event);
-        }
+    //         }
+    //         node_->next_activation_time = MAX_TIME;
+    //     }
+    // }
 
-        // After deactivation, we check for possible reactivation from neighbours.
-        if(this->long_apd_reactivation)
-        {
-            float node_excitable_at_time = node_->local_activation_time + 1.05*node_->apd_model.getERP(); // @todo Convert to parameter
-            Node* parent_node_ = nullptr;
-            for (unsigned int i = 0; i < this->tissue_geometry.num_neighbours; ++i )
-            {
-                // Danger! May go out of the array of Node
-                Node* neigh = this->NodeDisplace(node_, this->tissue_geometry.displacement[i]);
-                if (neigh == nullptr)
-                    continue;
-                assert(neigh >= this->tissue_nodes.data() && neigh < this->tissue_nodes.data() + this->tissue_nodes.size());
+    // if( this->tissue_time == node_->next_deactivation_time)
+    // {
+    //     // Deactivate node
+    //     node_->received_potential = 0.0;
+    //     node_->external_activation = false;
+    //     node_->next_deactivation_time = MAX_TIME;
 
-                // We skip void nodes
-                if ( neigh->type != CELL_TYPE_VOID )
-                {
-                    // If neighbour is active
-                    if (neigh->GetState(node_excitable_at_time) == Node::CellActivationState::ACTIVE)
-                    {
-                        // If we are before a percentage of the action potential duration, we get potential
-                        // If neighbour still has high potential, we might reactivate the node
-                        float neigh_plateau_duration = neigh->local_activation_time + this->apd_plateau_duration*neigh->apd_model.getAPD(); // @todo Convert to parameter
-                        if (node_excitable_at_time <= neigh_plateau_duration)
-                        {
-                            node_->received_potential += 1.0; // @todo Check potential value
-                            // We set the parent node as the latest activated node
-                            if (parent_node_ == nullptr)
-                                parent_node_ = neigh;
-                            else if (parent_node_->local_activation_time < neigh->local_activation_time)
-                                parent_node_ = neigh;
-                        }
-                    }
-                }
-            }
+    //     if (node_->next_activation_time < MAX_TIME)
+    //     {
+    //         node_->next_activation_event->ChangeEvent(node_->next_activation_time);
+    //         this->event_queue.InsertCellEvent(node_->next_activation_event);
+    //     }
 
-            if(node_->received_potential >= 3) // @todo Convert to parameter
-            {
-                // Reactivation
-                CellEvent * ev_react = node_->ScheduleActivation(parent_node_, node_excitable_at_time);
-                if(ev_react != nullptr)
-                    this->event_queue.InsertCellEvent(ev_react);
-                else // We reset potential
-                    node_->received_potential = 0.0;
+    //     // After deactivation, we check for possible reactivation from neighbours.
+    //     if(this->long_apd_reactivation)
+    //     {
+    //         float node_excitable_at_time = node_->local_activation_time + 1.05*node_->apd_model.getERP(); // @todo Convert to parameter
+    //         Node* parent_node_ = nullptr;
+    //         for (unsigned int i = 0; i < this->tissue_geometry.num_neighbours; ++i )
+    //         {
+    //             // Danger! May go out of the array of Node
+    //             Node* neigh = this->NodeDisplace(node_, this->tissue_geometry.displacement[i]);
+    //             if (neigh == nullptr)
+    //                 continue;
+    //             assert(neigh >= this->tissue_nodes.data() && neigh < this->tissue_nodes.data() + this->tissue_nodes.size());
 
-            }
-            else // We reset potential
-                node_->received_potential = 0.0;
-        }
+    //             // We skip void nodes
+    //             if ( neigh->type != CELL_TYPE_VOID )
+    //             {
+    //                 // If neighbour is active
+    //                 if (neigh->GetState(node_excitable_at_time) == Node::CellActivationState::ACTIVE)
+    //                 {
+    //                     // If we are before a percentage of the action potential duration, we get potential
+    //                     // If neighbour still has high potential, we might reactivate the node
+    //                     float neigh_plateau_duration = neigh->local_activation_time + this->apd_plateau_duration*neigh->apd_model.getAPD(); // @todo Convert to parameter
+    //                     if (node_excitable_at_time <= neigh_plateau_duration)
+    //                     {
+    //                         node_->received_potential += 1.0; // @todo Check potential value
+    //                         // We set the parent node as the latest activated node
+    //                         if (parent_node_ == nullptr)
+    //                             parent_node_ = neigh;
+    //                         else if (parent_node_->local_activation_time < neigh->local_activation_time)
+    //                             parent_node_ = neigh;
+    //                     }
+    //                 }
+    //             }
+    //         }
 
-    }
+    //         if(node_->received_potential >= 3) // @todo Convert to parameter
+    //         {
+    //             // Reactivation
+    //             CellEvent * ev_react = node_->ScheduleActivation(parent_node_, node_excitable_at_time);
+    //             if(ev_react != nullptr)
+    //                 this->event_queue.InsertCellEvent(ev_react);
+    //             else // We reset potential
+    //                 node_->received_potential = 0.0;
+
+    //         }
+    //         else // We reset potential
+    //             node_->received_potential = 0.0;
+    //     }
+
+    // }
 
 }
 
+#include "legacy_heap_propagation_impl.h"
 
 #endif
