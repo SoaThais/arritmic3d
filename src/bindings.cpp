@@ -5,6 +5,7 @@
 #include "../src/tissue.h"
 #include "../src/action_potential_rs.h"
 #include "../src/conduction_velocity.h"
+#include "../src/system_event_scheduler.h"
 
 #ifndef MODULE_NAME
 #define MODULE_NAME _core

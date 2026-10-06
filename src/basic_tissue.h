@@ -20,6 +20,7 @@
 #include "cell_event_queue.h"
 #include "error.h"
 #include "sensor_dict.h"
+#include "system_event_scheduler.h"
 
 using std::vector;
 
@@ -174,12 +175,13 @@ public:
 protected:
 
     // Geometry
-    FiberOrientation    tissue_fiber_orientation;
-    Geometry    tissue_geometry;
-    vector<Node>        tissue_nodes;
-    CellEventQueue<Node>  event_queue;
-    size_t      grid_size;      ///< Total number of nodes in the tissue (including CORE nodes).
-    int         n_live_nodes = 0;   ///< Number of nodes that are not CORE
+    FiberOrientation        tissue_fiber_orientation;
+    Geometry                tissue_geometry;
+    vector<Node>            tissue_nodes;
+    CellEventQueue<Node>    event_queue;
+    SystemEventScheduler    system_event_scheduler;
+    size_t grid_size;       ///< Total number of nodes in the tissue (including CORE nodes).
+    int n_live_nodes = 0;   ///< Number of nodes that are not CORE
 
     // Parameters
     ParametersPool      parameters_pool;
@@ -274,6 +276,9 @@ void BasicTissue<APM,CVM>::Init(const vector<CellType> & cell_types_, vector<Nod
 
     // Reset the timer
     timer.fill(0.0f);
+
+    // Reset system events
+    system_event_scheduler.Clear();
 
     // Fiber orientation
     if( fiber_orientation_.size() == n_nodes )
@@ -797,7 +802,8 @@ void BasicTissue<APM,CVM>::SetTimer(SystemEventType type, float period, float in
     {
         this->timer.at(int(type)) = period;
         // Insert the first system event
-        event_queue.InsertSystemEvent(initial_time, type);
+        // event_queue.InsertSystemEvent(initial_time, type);
+        system_event_scheduler.Insert(initial_time, type);
         return;
     }
 
@@ -832,7 +838,8 @@ void BasicTissue<APM,CVM>::SetSystemEvent(SystemEventType type, float t)
     int priority = 1; // Default priority for system events
     if(type == SystemEventType::EXT_ACTIVATION)
         priority = 0; // Higher priority for external activations
-    this->event_queue.InsertSystemEvent(t, type, priority);
+    // this->event_queue.InsertSystemEvent(t, type, priority);
+    this->system_event_scheduler.Insert(t, type, priority);
 }
 
 /**
@@ -896,6 +903,8 @@ void BasicTissue<APM,CVM>::SaveState(const std::string & filename) const
     parameters_pool.SaveState(state_file);
     // Save event queue
     event_queue.SaveState(state_file, tissue_nodes);
+    // Save system event scheduler
+    system_event_scheduler.SaveState(state_file);
 
     // Save each node
     for(const auto & node : tissue_nodes)
@@ -941,6 +950,8 @@ void BasicTissue<APM,CVM>::LoadState(const std::string & filename)
     LOG::Info(debug_level > 0, parameters_pool.Info());
     // Load event queue
     event_queue.LoadState(state_file, tissue_nodes);
+    // Load system event scheduler
+    system_event_scheduler.LoadState(state_file);
 
     // Load each node
     LOG::Info(debug_level > 0, "Loading " + std::to_string(n_live_nodes) + " nodes.");

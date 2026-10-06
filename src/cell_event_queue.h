@@ -77,62 +77,62 @@ struct Event
 
 };
 
-enum class SystemEventType : unsigned char
-{
-    NODE_EVENT = 0,
-    EXT_ACTIVATION,
-    FILE_WRITE,
-    OTHER,
-    NO_EVENT,
-    SIZE
-};
+// enum class SystemEventType : unsigned char
+// {
+//     NODE_EVENT = 0,
+//     EXT_ACTIVATION,
+//     FILE_WRITE,
+//     OTHER,
+//     NO_EVENT,
+//     SIZE
+// };
 
-/**
- * @brief System event structure
- *
- * This structure is used to store system events that are not related to a specific node.
- */
-struct SystemEvent
-{
-    float event_time;               ///< Event time
-    SystemEventType type;
-    unsigned char priority;         ///< Priority of the event (0 - before normal events, 1 - after normal events)
+// /**
+//  * @brief System event structure
+//  *
+//  * This structure is used to store system events that are not related to a specific node.
+//  */
+// struct SystemEvent
+// {
+//     float event_time;               ///< Event time
+//     SystemEventType type;
+//     unsigned char priority;         ///< Priority of the event (0 - before normal events, 1 - after normal events)
 
-    bool operator<(const SystemEvent & other) const
-    {
-        return this->event_time > other.event_time; // Note: Inverted comparison for priority queue (min-heap)
-    }
-};
+//     bool operator<(const SystemEvent & other) const
+//     {
+//         return this->event_time > other.event_time; // Note: Inverted comparison for priority queue (min-heap)
+//     }
+// };
 
-template<typename T>
-class SystemQueue : public std::priority_queue<T>
-{
-public:
+// template<typename T>
+// class SystemQueue : public std::priority_queue<T>
+// {
+// public:
 
-    void clear()
-    {
-        this->c.clear();
-    }
+//     void clear()
+//     {
+//         this->c.clear();
+//     }
 
-    auto Data()
-    {
-        return this->c.data();
-    }
+//     auto Data()
+//     {
+//         return this->c.data();
+//     }
 
-    auto Data() const
-    {
-        return this->c.data();
-    }
+//     auto Data() const
+//     {
+//         return this->c.data();
+//     }
 
-    /**
-     * @brief Resize the underlying container. Clears the queue.
-     */
-    void Resize(size_t n)
-    {
-        this->clear();
-        this->c.resize(n);
-    }
-};
+//     /**
+//      * @brief Resize the underlying container. Clears the queue.
+//      */
+//     void Resize(size_t n)
+//     {
+//         this->clear();
+//         this->c.resize(n);
+//     }
+// };
 
 /**
  * @brief Priority queue of cell events
@@ -158,7 +158,7 @@ public:
         // Clear previous data
         tree.clear();
         events.clear();
-        system_events.clear();
+        // system_events.clear();
 
         tree.reserve(2 * n_live_nodes);
 
@@ -235,7 +235,8 @@ public:
      */
     bool IsEmpty() const
     {
-        return tree.empty() && system_events.empty();
+        // return tree.empty() && system_events.empty();
+        return tree.empty();
     }
 
 
@@ -259,46 +260,46 @@ public:
 
     };
 
-    /**
-     * @brief Inserts a system event in the queue
-     *
-     * @param event The system event to insert.
-     */
-    void InsertSystemEvent(float time, SystemEventType type, unsigned char priority = 1)
-    {
-        SystemEvent ev{time, type, priority};
-        system_events.push(ev);
-    }
+    // /**
+    //  * @brief Inserts a system event in the queue
+    //  *
+    //  * @param event The system event to insert.
+    //  */
+    // void InsertSystemEvent(float time, SystemEventType type, unsigned char priority = 1)
+    // {
+    //     SystemEvent ev{time, type, priority};
+    //     system_events.push(ev);
+    // }
 
-    /**
-     * @brief Gets information about the next event in the queue.
-     *
-     * @return A tuple containing the event time and type.
-     */
-    std::tuple<float, SystemEventType> GetInfo() const
-    {
-        // If cell events queue is empty, return the first system event
-        if(tree.empty() )
-        {
-            const SystemEvent& ev = system_events.top();
-            return std::make_tuple(ev.event_time, ev.type);
-        }
+    // /**
+    //  * @brief Gets information about the next event in the queue.
+    //  *
+    //  * @return A tuple containing the event time and type.
+    //  */
+    // std::tuple<float, SystemEventType> GetInfo() const
+    // {
+    //     // If cell events queue is empty, return the first system event
+    //     if(tree.empty() )
+    //     {
+    //         const SystemEvent& ev = system_events.top();
+    //         return std::make_tuple(ev.event_time, ev.type);
+    //     }
 
-        // If the system events queue is empty, return the first cell event
-        if(system_events.empty() )
-        {
-            CellEvent ev = *GetFirstCell();
-            return std::make_tuple(ev.event_time, SystemEventType::NODE_EVENT);
-        }
+    //     // If the system events queue is empty, return the first cell event
+    //     if(system_events.empty() )
+    //     {
+    //         CellEvent ev = *GetFirstCell();
+    //         return std::make_tuple(ev.event_time, SystemEventType::NODE_EVENT);
+    //     }
 
-        // Both queues have elements, compare the first element of each queue
-        const SystemEvent& ev1 = system_events.top();
-        CellEvent ev2 = *GetFirstCell();
-        if (ev1.event_time < ev2.event_time || (ev1.event_time == ev2.event_time && ev1.priority == 0))
-            return std::make_tuple(ev1.event_time, ev1.type);
-        else
-            return std::make_tuple(ev2.event_time, SystemEventType::NODE_EVENT);
-    }
+    //     // Both queues have elements, compare the first element of each queue
+    //     const SystemEvent& ev1 = system_events.top();
+    //     CellEvent ev2 = *GetFirstCell();
+    //     if (ev1.event_time < ev2.event_time || (ev1.event_time == ev2.event_time && ev1.priority == 0))
+    //         return std::make_tuple(ev1.event_time, ev1.type);
+    //     else
+    //         return std::make_tuple(ev2.event_time, SystemEventType::NODE_EVENT);
+    // }
 
     /**
      * @brief Returns the first element in the queue.
@@ -330,12 +331,12 @@ public:
         BubbleDown(0);
     }
 
-    void ExtractFirstSystem()
-    {
-        // Throws an exception if the queue is empty
+    // void ExtractFirstSystem()
+    // {
+    //     // Throws an exception if the queue is empty
 
-        system_events.pop();
-    }
+    //     system_events.pop();
+    // }
 
     /**
      * Save the state of the event queue in binary format.
@@ -423,7 +424,7 @@ private:
     std::vector<CellEvent *> tree; ///< Vector to store the tree for the heap
     std::vector<CellEvent> events; ///< Vector to store the events
 
-    SystemQueue<SystemEvent> system_events; ///< Priority queue for system events
+    // SystemQueue<SystemEvent> system_events; ///< Priority queue for system events
 };
 
 template<typename Node>
@@ -510,12 +511,12 @@ void CellEventQueue<Node>::SaveState(std::ofstream & f, const std::vector<Node> 
         f.write( (char *) &ev_index, sizeof(size_t) );
     }
 
-    // Save number of system events
-    size_t n_system_events = system_events.size();
-    f.write( (char *) &n_system_events, sizeof(size_t) );
-    // Save the system events
-    auto system_events_data = system_events.Data();
-    f.write( (char *) system_events_data, n_system_events * sizeof(SystemEvent) );
+    // // Save number of system events
+    // size_t n_system_events = system_events.size();
+    // f.write( (char *) &n_system_events, sizeof(size_t) );
+    // // Save the system events
+    // auto system_events_data = system_events.Data();
+    // f.write( (char *) system_events_data, n_system_events * sizeof(SystemEvent) );
 }
 
 template<typename Node>
@@ -555,12 +556,12 @@ void CellEventQueue<Node>::LoadState(std::ifstream & f, const std::vector<Node> 
         tree[i] = &events[ev_index];
     }
 
-    // Load system events
-    size_t n_system_events;
-    f.read( (char *) &n_system_events, sizeof(size_t) );
-    system_events.Resize(n_system_events);
-    auto system_events_data = system_events.Data();
-    f.read( (char *) system_events_data, n_system_events * sizeof(SystemEvent) );
+    // // Load system events
+    // size_t n_system_events;
+    // f.read( (char *) &n_system_events, sizeof(size_t) );
+    // system_events.Resize(n_system_events);
+    // auto system_events_data = system_events.Data();
+    // f.read( (char *) system_events_data, n_system_events * sizeof(SystemEvent) );
 }
 
 #endif // CELLEVENT_H

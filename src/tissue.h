@@ -18,6 +18,7 @@
 #include "cell_event_queue.h"
 #include "error.h"
 #include "basic_tissue.h"
+#include "system_event_scheduler.h"
 
 using std::vector;
 
@@ -58,66 +59,167 @@ private:
  * @return true if there is an event of the simulation.
 */
 template <typename APM,typename CVM>
-SystemEventType CardiacTissue<APM,CVM>::update(int debug)
-{
+SystemEventType CardiacTissue<APM,CVM>::update(int debug) {
 
-    if(!this->event_queue.IsEmpty())
-    {
-        auto [ev_time, ev_type] = this->event_queue.GetInfo();
-        LOG::Info(debug > 0, "Event at t=", ev_time, " type=", (int)ev_type);
+    bool cell_empty   = this->event_queue.IsEmpty();
+    bool system_empty = this->system_event_scheduler.IsEmpty();
 
-        float new_t = ev_time;
-        LOG::Warning(new_t < this->tissue_time, " t=", this->tissue_time, " older than   ev.t=", new_t);
-
-        this->tissue_time = new_t;
-
-        // System event
-        if(ev_type != SystemEventType::NODE_EVENT)
-        {
-            this->event_queue.ExtractFirstSystem();
-
-            float inc_time = this->timer.at(int(ev_type));
-            if(inc_time > 0)
-            {
-                int priority = 1;
-                if(ev_type == SystemEventType::EXT_ACTIVATION)
-                    priority = 0;
-                float new_ev_time = this->tissue_time + inc_time;
-                this->event_queue.InsertSystemEvent(new_ev_time, ev_type, priority);
-            }
-
-            return ev_type;
-        }
-
-        // Node event
-        CellEvent * ev = this->event_queue.GetFirstCell();
-        this->event_queue.ExtractFirstCell();
-        LOG::Info(debug > 0, "Node Event for node ", ev->cell_node->id, " Type: ", int(ev->event_type));
-        LOG::Info(debug > 1, "Before processing event. Node value: ", *(ev->cell_node) );
-        LOG::Warning(ev->cell_node->parameters == nullptr, "Node ", ev->cell_node->id, " has no parameters assigned.");
-
-        TriggerEvent(ev);
-        //n_cells_updated++;
-
-        // Check next event
-        if(!this->event_queue.IsEmpty())
-        {
-            auto ev_info = this->event_queue.GetInfo();
-            LOG::Error(std::get<0>(ev_info) < this->tissue_time, " We skiped an event!");
-        }
-
-        LOG::Info(debug > 1, "After processing event. Node value: ", *(ev->cell_node) );
-
-        // Store info in case of sensor node
-        if(ev->cell_node->parameters->sensor)
-        {
-            this->sensor_dict.AddData(ev->cell_node->id, ev->cell_node->GetData(ev, this->tissue_time));
-        }
-
-        return SystemEventType::NODE_EVENT;
-    }
-    else
+    if(cell_empty && system_empty)
         return SystemEventType::NO_EVENT;
+
+    bool process_system = false;
+
+    if(cell_empty) {
+        process_system = true;
+    }
+    else if(system_empty) {
+        process_system = false;
+    }
+    else {
+        auto *cell_ev         = this->event_queue.GetFirstCell();
+        const auto &system_ev = this->system_event_scheduler.GetFirst();
+
+        if(system_ev.event_time < cell_ev->event_time) {
+            process_system = true;
+        }
+        else if(system_ev.event_time > cell_ev->event_time) {
+            process_system = false;
+        }
+        else {
+            // Same time: system event priority decides.
+            process_system = system_ev.priority == 0;
+        }
+    }
+
+    // ---------------------------------------------------------
+    // SYSTEM EVENT
+    // ---------------------------------------------------------
+
+    if(process_system) {
+
+        const auto &system_ev = this->system_event_scheduler.GetFirst();
+
+        float ev_time = system_ev.event_time;
+        SystemEventType ev_type = system_ev.type;
+
+        LOG::Info(debug > 0, "System event at t=", ev_time, " type=", int(ev_type));
+
+        this->tissue_time = ev_time;
+
+        this->system_event_scheduler.ExtractFirst();
+
+        float inc_time = this->timer.at(int(ev_type));
+
+        if(inc_time > 0) {
+
+            int priority = 1;
+
+            if(ev_type == SystemEventType::EXT_ACTIVATION)
+                priority = 0;
+
+            float new_ev_time = this->tissue_time + inc_time;
+
+            this->system_event_scheduler.Insert(new_ev_time, ev_type, priority);
+        }
+
+        return ev_type;
+    }
+
+    // ---------------------------------------------------------
+    // CELL EVENT
+    // ---------------------------------------------------------
+
+    CellEvent *ev = this->event_queue.GetFirstCell();
+
+    float ev_time = ev->event_time;
+
+    LOG::Info(debug > 0, "Cell event at t=", ev_time, " node=", ev->cell_node->id);
+
+    LOG::Warning(ev_time < this->tissue_time, " t=", this->tissue_time, " older than ev.t=", ev_time);
+
+    this->tissue_time = ev_time;
+
+    this->event_queue.ExtractFirstCell();
+
+    LOG::Info(debug > 0, "Node Event for node ", ev->cell_node->id, " Type: ", int(ev->event_type));
+
+    LOG::Info(debug > 1, "Before processing event. Node value: ", *(ev->cell_node));
+
+    LOG::Warning(ev->cell_node->parameters == nullptr, "Node ", ev->cell_node->id, " has no parameters assigned.");
+
+    TriggerEvent(ev);
+
+    // Check next cell event
+    if(!this->event_queue.IsEmpty()) {
+        auto *next_ev = this->event_queue.GetFirstCell();
+        LOG::Error(next_ev->event_time < this->tissue_time, " We skipped an event!");
+    }
+
+    LOG::Info(debug > 1, "After processing event. Node value: ", *(ev->cell_node));
+
+    if(ev->cell_node->parameters->sensor) {
+        this->sensor_dict.AddData(ev->cell_node->id, ev->cell_node->GetData(ev, this->tissue_time));
+    }
+
+    return SystemEventType::NODE_EVENT;
+
+    // if(!this->event_queue.IsEmpty())
+    // {
+    //     auto [ev_time, ev_type] = this->event_queue.GetInfo();
+    //     LOG::Info(debug > 0, "Event at t=", ev_time, " type=", (int)ev_type);
+
+    //     float new_t = ev_time;
+    //     LOG::Warning(new_t < this->tissue_time, " t=", this->tissue_time, " older than   ev.t=", new_t);
+
+    //     this->tissue_time = new_t;
+
+    //     // System event
+    //     if(ev_type != SystemEventType::NODE_EVENT)
+    //     {
+    //         this->event_queue.ExtractFirstSystem();
+
+    //         float inc_time = this->timer.at(int(ev_type));
+    //         if(inc_time > 0)
+    //         {
+    //             int priority = 1;
+    //             if(ev_type == SystemEventType::EXT_ACTIVATION)
+    //                 priority = 0;
+    //             float new_ev_time = this->tissue_time + inc_time;
+    //             this->event_queue.InsertSystemEvent(new_ev_time, ev_type, priority);
+    //         }
+
+    //         return ev_type;
+    //     }
+
+    //     // Node event
+    //     CellEvent * ev = this->event_queue.GetFirstCell();
+    //     this->event_queue.ExtractFirstCell();
+    //     LOG::Info(debug > 0, "Node Event for node ", ev->cell_node->id, " Type: ", int(ev->event_type));
+    //     LOG::Info(debug > 1, "Before processing event. Node value: ", *(ev->cell_node) );
+    //     LOG::Warning(ev->cell_node->parameters == nullptr, "Node ", ev->cell_node->id, " has no parameters assigned.");
+
+    //     TriggerEvent(ev);
+    //     //n_cells_updated++;
+
+    //     // Check next event
+    //     if(!this->event_queue.IsEmpty())
+    //     {
+    //         auto ev_info = this->event_queue.GetInfo();
+    //         LOG::Error(std::get<0>(ev_info) < this->tissue_time, " We skiped an event!");
+    //     }
+
+    //     LOG::Info(debug > 1, "After processing event. Node value: ", *(ev->cell_node) );
+
+    //     // Store info in case of sensor node
+    //     if(ev->cell_node->parameters->sensor)
+    //     {
+    //         this->sensor_dict.AddData(ev->cell_node->id, ev->cell_node->GetData(ev, this->tissue_time));
+    //     }
+
+    //     return SystemEventType::NODE_EVENT;
+    // }
+    // else
+    //     return SystemEventType::NO_EVENT;
 }
 
 
