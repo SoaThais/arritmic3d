@@ -41,8 +41,18 @@ class LegacyHeapPropagation {
         using Node = NodeT<APM, CVM>;
         using CellEvent = Event<Node>;
 
+        struct PropagationState {
+            float next_activation_time = MAX_TIME;
+            Node* activation_parent = nullptr;
+            int activation_beat = -1;
+            bool external_activation = false;
+            CellEvent* next_activation_event = nullptr;
+            CellEvent* next_deactivation_event = nullptr;
+        };
+
         LegacyHeapPropagation() = default;
 
+        void Initialize(Tissue& tissue);
 
         /**
         * @brief Processa um evento celular usando o algoritmo legado.
@@ -52,8 +62,17 @@ class LegacyHeapPropagation {
         */
         void ProcessEvent(Tissue& tissue, CellEvent* ev);
 
+        CellEvent* ScheduleExternalActivation(Tissue& tissue, Node* node, float activation_time, int beat_n);
 
     private:
+
+        vector<PropagationState> propagation_states;
+
+        size_t NodeIndex(Tissue& tissue, Node* node) const;
+    
+        PropagationState& GetState(Tissue& tissue, Node* node);
+
+        CellEvent* ScheduleActivation(Tissue& tissue, Node* node, Node* parent, float activation_time);
 
         /**
         * @brief Propaga a ativação para os vizinhos.

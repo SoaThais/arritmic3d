@@ -15,7 +15,7 @@
 
 #include "definitions.h"
 #include "node_parameters.h"
-#include "cell_event_queue.h"
+// #include "cell_event_queue.h"
 #include "geometry.h"
 
 using std::vector;
@@ -57,97 +57,116 @@ public:
     using Vector3 = Eigen::Vector3f;
     using Vector2 = Eigen::Vector2f;
 
-    using CellEvent = Event<NodeT>;
+    // using CellEvent = Event<NodeT>;
 
     friend class CardiacTissue<ActionPotentialModel, ConductionVelocityModel>;
     friend class BasicTissue<ActionPotentialModel, ConductionVelocityModel>;
     friend class LegacyHeapPropagation<ActionPotentialModel, ConductionVelocityModel>;
 
     /// State of the cell.
-    enum class CellActivationState : char { INACTIVE = 0, WAITING_FOR_ACTIVATION, ACTIVE };
+    enum class CellActivationState : char { 
+        INACTIVE = 0, 
+        // WAITING_FOR_ACTIVATION, 
+        ACTIVE 
+    };
 
     NodeT();
     void Init(float current_time_, float initial_apd_);
     void ReApplyParam(float current_time_);
     float ComputeDirectionalConductionVelocity(const NodeT::Vector3 &direction_);
-    CellEvent* ScheduleActivation( NodeT *origin_, float activation_time_);
-    CellEvent* ScheduleExternalActivation(float activation_time_, int beat_n_);
+    
+    // CellEvent* ScheduleActivation( NodeT *origin_, float activation_time_);
+    // CellEvent* ScheduleExternalActivation(float activation_time_, int beat_n_);
 
     unsigned int GetId() const { return id; }
     CellActivationState GetState(float current_time_) const;
     int GetBeat() const { return beat; }
-    void SaveState(std::ofstream & f, const ParametersPool & parameters_pool, const CellEventQueue<NodeT> & event_queue) const;
-    void LoadState(std::ifstream & f, ParametersPool & parameters_pool, CellEventQueue<NodeT> & event_queue, BasicTissue<ActionPotentialModel, ConductionVelocityModel> & tissue);
+
+    // void SaveState(std::ofstream & f, const ParametersPool & parameters_pool, const CellEventQueue<NodeT> & event_queue) const;
+    // void LoadState(std::ifstream & f, ParametersPool & parameters_pool, CellEventQueue<NodeT> & event_queue, BasicTissue<ActionPotentialModel, ConductionVelocityModel> & tissue);
+
+    void SaveState(std::ofstream & f, const ParametersPool & parameters_pool) const;
+    void LoadState(std::ifstream & f, ParametersPool & parameters_pool);
 
     // Data extraction ---
-    using NodeData = std::tuple<float, int, int, int, float, int, float, float, float, float, float, float>;
-    NodeData GetData(const CellEvent* ev, float current_time_) const
-    {
-        return NodeData(current_time_, int(ev->event_type), int(type), beat, local_activation_time, apd_model.IsActive(current_time_), apd_model.getAPD(), apd_model.getLastDI(),
-                        conduction_vel, next_activation_time, next_deactivation_time, received_potential);
+    // using NodeData = std::tuple<float, int, int, int, float, int, float, float, float, float, float, float>;
+    using NodeData = std::tuple<float, int, int, float, int, float, float, float, float, float>;
+    
+    // NodeData GetData(const CellEvent* ev, float current_time_) const {
+    NodeData GetData(float current_time_) const {
+        // return NodeData(current_time_, int(ev->event_type), int(type), beat, local_activation_time, apd_model.IsActive(current_time_), apd_model.getAPD(), apd_model.getLastDI(),
+        //     conduction_vel, next_activation_time, next_deactivation_time, received_potential);
+        return NodeData(current_time_, int(type), beat, local_activation_time, apd_model.IsActive(current_time_), apd_model.getAPD(), apd_model.getLastDI(),
+            conduction_vel, recovery_time, received_potential);
     }
+
     static const vector<std::string> GetDataNames()
     {
-        static const vector<std::string> names = {"Time", "event_type", "type", "beat", "local_activation_time", "activated", "APD", "LastDI", "conduction_velocity",
-                                                "next_activation_time", "next_deactivation_time",
-                                                "received_potential"};
+        // static const vector<std::string> names = {"Time", "event_type", "type", "beat", "local_activation_time", "activated", "APD", "LastDI", "conduction_velocity",
+        //                                         "next_activation_time", "next_deactivation_time",
+        //                                         "received_potential"};
+        static const vector<std::string> names = {"Time", "type", "beat", "local_activation_time", "activated", "APD", "LastDI", "conduction_velocity",
+            "recovery_time", "received_potential"};
         return names;
     }
+
     //----------
     friend std::ostream & operator<<(std::ostream &os, const NodeT &node)
     {
         os << "Node id: " << node.id << " Type: " << (int)node.type << " Beat: " << node.beat;
-        os << " conduction velocity: " << node.conduction_vel;
+        os << " Conduction Velocity: " << node.conduction_vel;
         os << " APD: " << node.apd_model.getAPD();
         os << " Last DI: " << node.apd_model.getLastDI();
         os << " CV: " << node.cv_model.getConductionVelocity();
         os << " LAT: " << node.local_activation_time;
-        os << " Next activation time: " << node.next_activation_time;
-        os << " Next deactivation time: " << node.next_deactivation_time;
+        os << " Recovery time: " << node.recovery_time;
+        // os << " Next activation time: " << node.next_activation_time;
+        // os << " Next deactivation time: " << node.next_deactivation_time;
         os << " Received potential: " << node.received_potential;
-        if(node.activation_parent != nullptr)
-            os << " Activation parent: " << node.activation_parent->id;
+        // if(node.activation_parent != nullptr)
+        //     os << " Activation parent: " << node.activation_parent->id;
         return os;
     }
 
 private:
-    constexpr static int SAVE_VERSION = 3;  ///< Version of the NodeT class for state saving/loading.
-    NodeParameters*  parameters;         ///< @brief Parameters of the Node
-    unsigned int    id;                 ///< @brief Unique Node id. Corresponds with the grid position in the tissue.
-    size_t          ext_grid_pos;        ///< @brief Position in the extended grid (index vector).
+    constexpr static int SAVE_VERSION = 4;  ///< Version of the NodeT class for state saving/loading.
+    NodeParameters* parameters;             ///< @brief Parameters of the Node
+    unsigned int    id;                     ///< @brief Unique Node id. Corresponds with the grid position in the tissue.
+    size_t          ext_grid_pos;           ///< @brief Position in the extended grid (index vector).
 
-    CellType        type = CELL_TYPE_VOID; ///< @brief Type of the Node
-    bool            external_activation;
-    bool            blocked;            ///< Node activation has been blocked
-    int             beat;               ///< @brief Last beat  of activation
+    CellType        type = CELL_TYPE_VOID;  ///< @brief Type of the Node
+    // bool            external_activation;
+    bool            blocked;                ///< Node activation has been blocked
+    int             beat;                   ///< @brief Last beat  of activation
 
-    float           conduction_vel;             ///< @brief Conduction velocity in the long. direction
-    Vector3         orientation = Vector3::Zero();     ///< @brief Fiber orientation.
-                                                    ///< A normalized vector indicating longitudinal direction.
-                                                    ///< Default to (0,0,0) for isotropic diffusion.
+    float           conduction_vel;                     ///< @brief Conduction velocity in the long. direction
+    Vector3         orientation = Vector3::Zero();      ///< @brief Fiber orientation.
+                                                        ///< A normalized vector indicating longitudinal direction.
+                                                        ///< Default to (0,0,0) for isotropic diffusion.
 
-    ActionPotentialModel apd_model;
+    ActionPotentialModel      apd_model;
 
     ConductionVelocityModel   cv_model;
 
     float           local_activation_time; ///< @brief Time of the last activation. A.k.a. LAT.
+    float           recovery_time;
 
     float           kapd_v;
 
     // Activation
     float               received_potential;
 
-    float               next_activation_time;  ///< @brief Time of the next activation
-    float               next_deactivation_time; ///< @brief Time of the next deactivation
+    // float               next_activation_time;  ///< @brief Time of the next activation
+    // float               next_deactivation_time; ///< @brief Time of the next deactivation
 
-    CellEvent *         next_activation_event;  ///< @brief Event for the next activation of the node
-    CellEvent *         next_deactivation_event;  ///< @brief Event for the next deactivation of the node
+    // CellEvent *         next_activation_event;  ///< @brief Event for the next activation of the node
+    // CellEvent *         next_deactivation_event;  ///< @brief Event for the next deactivation of the node
 
-    NodeT *              activation_parent; ///< Node that activated this one
+    // NodeT *              activation_parent; ///< Node that activated this one
 
 
     //void Deactivate(float current_time_);
-    bool Activate(float current_time_, CardiacTissue<ActionPotentialModel, ConductionVelocityModel> * tissue_);
+    bool Activate(float current_time_, int source_beat_, CardiacTissue<ActionPotentialModel, ConductionVelocityModel> * tissue_);
     bool ComputeActivation(float current_time_, CardiacTissue<ActionPotentialModel, ConductionVelocityModel> * tissue_);
 
 };

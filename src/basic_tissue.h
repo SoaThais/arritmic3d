@@ -174,6 +174,9 @@ public:
 
 protected:
 
+    virtual void OnInitComplete() {
+    }
+
     // Geometry
     FiberOrientation        tissue_fiber_orientation;
     Geometry                tissue_geometry;
@@ -341,15 +344,24 @@ void BasicTissue<APM,CVM>::Init(const vector<CellType> & cell_types_, vector<Nod
     // Initialize the event queue
     event_queue.Init(tissue_nodes, n_live_nodes);
 
-    // Link each node with its events.
-    for(size_t i = 0; i < tissue_nodes.size(); i++)
-    {
-        tissue_nodes[i].next_activation_event = event_queue.GetEvent(i,CellEventType::ACTIVATION);
-        tissue_nodes[i].next_deactivation_event = event_queue.GetEvent(i,CellEventType::DEACTIVATION);
+    // // Link each node with its events.
+    // for(size_t i = 0; i < tissue_nodes.size(); i++)
+    // {
+    //     tissue_nodes[i].next_activation_event = event_queue.GetEvent(i,CellEventType::ACTIVATION);
+    //     tissue_nodes[i].next_deactivation_event = event_queue.GetEvent(i,CellEventType::DEACTIVATION);
 
+    //     // Init should only be called after the Node parameters are set.
+    //     tissue_nodes[i].Init(tissue_time, initial_apd);
+    // }
+
+    // Initialize nodes.
+    for(size_t i = 0; i < tissue_nodes.size(); i++) {
         // Init should only be called after the Node parameters are set.
         tissue_nodes[i].Init(tissue_time, initial_apd);
     }
+
+    // Allow derived classes to initialize their own components.
+    OnInitComplete();
 
     LOG::Info(debug_level > 1, "End of Init");
 }
@@ -909,7 +921,8 @@ void BasicTissue<APM,CVM>::SaveState(const std::string & filename) const
     // Save each node
     for(const auto & node : tissue_nodes)
     {
-        node.SaveState(state_file, parameters_pool, event_queue);
+        // node.SaveState(state_file, parameters_pool, event_queue);
+        node.SaveState(state_file, parameters_pool);
     }
 
     state_file.close();
@@ -957,11 +970,14 @@ void BasicTissue<APM,CVM>::LoadState(const std::string & filename)
     LOG::Info(debug_level > 0, "Loading " + std::to_string(n_live_nodes) + " nodes.");
     for(auto & node : tissue_nodes)
     {
-        node.LoadState(state_file, parameters_pool, event_queue, *this);
+        // node.LoadState(state_file, parameters_pool, event_queue, *this);
+        node.LoadState(state_file, parameters_pool);
     }
 
     // Restore the node index.
     ReconstructIndex();
+
+    OnInitComplete();
 
     state_file.close();
 }

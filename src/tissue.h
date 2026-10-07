@@ -54,11 +54,18 @@ private:
 
     friend class LegacyHeapPropagation<APM,CVM>;
 
-    bool long_apd_reactivation = false;
-    float apd_plateau_duration = 0.8; // Percentage of APD considered as plateau for reactivation
-    float apd_variation = 0.0;
-    float cv_variation = 0.0;
+    void OnInitComplete() override;
+
+    bool long_apd_reactivation  = false;
+    float apd_plateau_duration  = 0.8; // Percentage of APD considered as plateau for reactivation
+    float apd_variation         = 0.0;
+    float cv_variation          = 0.0;
 };
+
+template <typename APM, typename CVM>
+void CardiacTissue<APM, CVM>::OnInitComplete() {
+    propagation_solver.Initialize(*this);
+}
 
 /**
  * Update the tissue simulation processing an event.
@@ -165,7 +172,8 @@ SystemEventType CardiacTissue<APM,CVM>::update(int debug) {
     LOG::Info(debug > 1, "After processing event. Node value: ", *(ev->cell_node));
 
     if(ev->cell_node->parameters->sensor) {
-        this->sensor_dict.AddData(ev->cell_node->id, ev->cell_node->GetData(ev, this->tissue_time));
+        // this->sensor_dict.AddData(ev->cell_node->id, ev->cell_node->GetData(ev, this->tissue_time));
+        this->sensor_dict.AddData(ev->cell_node->id, ev->cell_node->GetData(this->tissue_time));
     }
 
     return SystemEventType::NODE_EVENT;
@@ -249,9 +257,17 @@ void CardiacTissue<APM,CVM>::ExternalActivation(const vector<size_t> & node_ids,
             LOG::Warning(true, "ExternalActivation(): Node id ", node_ids[i], " is VOID or out of bounds. Activation ignored.");
             continue;
         }
-        CellEvent * e = this->tissue_nodes.at(node_pos).ScheduleExternalActivation(activation_time, beat_n);
-        if(e != nullptr)
-            this->event_queue.InsertCellEvent(e);
+        // CellEvent * e = this->tissue_nodes.at(node_pos).ScheduleExternalActivation(activation_time, beat_n);
+        // if(e != nullptr)
+        //     this->event_queue.InsertCellEvent(e);
+        this->propagation_solver.ScheduleExternalActivation(*this, &this->tissue_nodes.at(node_pos), activation_time, beat_n);
+
+        // std::cout
+        //     << "[DEBUG ExternalActivation] node=" << node_pos
+        //     << " time=" << activation_time
+        //     << " beat=" << beat_n
+        //     << std::endl;
+
     }
 }
 
