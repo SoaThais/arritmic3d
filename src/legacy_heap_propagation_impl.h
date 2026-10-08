@@ -4,13 +4,6 @@
 template <typename APM, typename CVM>
 void LegacyHeapPropagation<APM, CVM>::Initialize(Tissue& tissue) {
 
-    // LOG::Info(
-    //     true,
-    //     "LegacyHeapPropagation::Initialize() with ",
-    //     tissue.tissue_nodes.size(),
-    //     " nodes"
-    // );
-
     propagation_states.clear();
     propagation_states.resize(tissue.tissue_nodes.size());
 
@@ -53,33 +46,11 @@ LegacyHeapPropagation<APM, CVM>::ScheduleActivation(Tissue& tissue, Node* node, 
         return nullptr;
     }
 
-    // if (node->GetId() == 39246) {
-    //     std::cout
-    //         << "\n[DEBUG SCHEDULE 39246]"
-    //         << "\n  parent=" << parent->GetId()
-    //         << "\n  parent_beat=" << parent->beat
-    //         << "\n  node_current_beat=" << node->beat
-    //         << "\n  activation_time=" << activation_time
-    //         << "\n  old_next_activation=" << state.next_activation_time
-    //         << "\n  old_activation_beat=" << state.activation_beat
-    //         << "\n";
-    // }
-
     if(activation_time < state.next_activation_time) {
 
         state.next_activation_time = activation_time;
         state.activation_parent    = parent;
         state.activation_beat      = parent->beat;
-
-        // node->beat = state.activation_beat;
-
-        // if (node->GetId() == 39246) {
-        //     std::cout
-        //         << "[DEBUG AFTER SCHEDULE]"
-        //         << " activation_beat=" << state.activation_beat
-        //         << " node_beat=" << node->beat
-        //         << std::endl;
-        // }
 
         state.next_activation_event->ChangeEvent(state.next_activation_time);
 
@@ -108,19 +79,6 @@ LegacyHeapPropagation<APM, CVM>::ScheduleExternalActivation(Tissue& tissue, Node
             state.activation_beat       = beat_n;
 
             node->received_potential = 1.0;
-
-            // if(node->GetId() >= 1150 && node->GetId() <= 1399) {
-            //     std::cout
-            //         << "[DEBUG SCHEDULE TARGET]"
-            //         << " node=" << node->GetId()
-            //         << " activation_time=" << activation_time
-            //         << " beat=" << beat_n
-            //         << " next_activation_time=" << state.next_activation_time
-            //         << " event_ptr=" << state.next_activation_event
-            //         << " event_position="
-            //         << state.next_activation_event->position_in_tree
-            //         << std::endl;
-            // }
 
             tissue.event_queue.InsertCellEvent(state.next_activation_event);
 

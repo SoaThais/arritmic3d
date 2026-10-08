@@ -20,8 +20,15 @@
 #include "basic_tissue.h"
 #include "system_event_scheduler.h"
 #include "legacy_heap_propagation.h"
+#include <functional>
 
 using std::vector;
+
+struct Stimuli {
+    float time;
+    int beat;
+    std::vector<size_t> nodes;
+};
 
 /**
  * @brief Class to model cardiac tissue. Adds propagation functions to the basic tissue.
@@ -38,13 +45,20 @@ public:
     using CellEvent = Event<NodeT<APM,CVM> >;
     using Node = NodeT<APM,CVM>;
 
-    LegacyHeapPropagation<APM,CVM> propagation_solver;
+    LegacyHeapPropagation<APM,CVM> propagation_solver;    
 
     CardiacTissue(int size_x_, int size_y_, int size_z_, float dx_, float dy_, float dz_) :
                 BasicTissue<APM,CVM>(size_x_, size_y_, size_z_, dx_, dy_, dz_) {}
+    
     SystemEventType update(int debug = 0);
+
+    void ScheduleActivation(const vector<size_t> & nodes, float activation_time, int beat);
     void ExternalActivation(const vector<size_t> & nodes, float activation_time, int beat_n);
+    
+    void Run(float end_time, std::function<void(float)> output_callback = nullptr, int debug = 0);
+
     void TriggerEvent(CellEvent* ev);
+
     void ResetVariations() { apd_variation = 0.0; cv_variation = 0.0; }
     float GetAPDMeanVariation() const { return apd_variation / this->GetNumLiveNodes(); }
     float GetCVVariation() const { return cv_variation / this->GetNumLiveNodes(); }
@@ -53,6 +67,9 @@ public:
 private:
 
     friend class LegacyHeapPropagation<APM,CVM>;
+
+    std::vector<Stimuli> external_activations;
+    void ExecuteScheduledActivation(float activation_time);
 
     void OnInitComplete() override;
 
@@ -65,6 +82,50 @@ private:
 template <typename APM, typename CVM>
 void CardiacTissue<APM, CVM>::OnInitComplete() {
     propagation_solver.Initialize(*this);
+}
+
+template <typename APM, typename CVM>
+void CardiacTissue<APM,CVM>::ScheduleActivation(const vector<size_t> & nodes, float activation_time, int beat) {
+    this->external_activations.push_back({activation_time, beat, nodes});
+    this->system_event_scheduler.Insert(activation_time, SystemEventType::EXT_ACTIVATION, 0);
+}
+
+template <typename APM, typename CVM>
+void CardiacTissue<APM, CVM>::ExecuteScheduledActivation(float activation_time) {
+
+    constexpr float time_tolerance = 1e-4f;
+
+    for(const auto &stimulus : this->external_activations) {
+        if (std::fabs(stimulus.time - activation_time) <= time_tolerance) {
+            this->ExternalActivation(stimulus.nodes, stimulus.time, stimulus.beat);
+            printf("Beat at time: %.2f\n", activation_time);
+        }
+    }
+
+}
+
+template <typename APM, typename CVM>
+void CardiacTissue<APM,CVM>::Run(float end_time, std::function<void(float)> output_callback, int debug) {
+
+    while (this->tissue_time < end_time) {
+
+        SystemEventType event_type = this->update(debug);
+
+        if(event_type == SystemEventType::NO_EVENT)
+            break;
+
+        switch (event_type) {
+            case SystemEventType::EXT_ACTIVATION:
+                this->ExecuteScheduledActivation(this->tissue_time);
+                break;
+            case SystemEventType::FILE_WRITE:
+                if (output_callback) 
+                    output_callback(this->tissue_time);
+                break;
+            default:
+                break;
+        }
+    }
 }
 
 /**
@@ -237,8 +298,6 @@ SystemEventType CardiacTissue<APM,CVM>::update(int debug) {
     //     return SystemEventType::NO_EVENT;
 }
 
-
-
 /**
  * External activation of a set of nodes.
  * @param node_ids List of node ids to activate.
@@ -247,27 +306,14 @@ SystemEventType CardiacTissue<APM,CVM>::update(int debug) {
  * @todo If the node is already active, generates a core-dump.
 */
 template <typename APM,typename CVM>
-void CardiacTissue<APM,CVM>::ExternalActivation(const vector<size_t> & node_ids, float activation_time, int beat_n)
-{
-    for(size_t i = 0; i < node_ids.size(); i++)
-    {
+void CardiacTissue<APM,CVM>::ExternalActivation(const vector<size_t> & node_ids, float activation_time, int beat_n) {
+    for(size_t i = 0; i < node_ids.size(); i++) {
         auto node_pos = this->tissue_geometry.GetMemIndex_from_GridIndex(node_ids[i]);
-        if(node_pos == NO_INDEX || this->tissue_nodes.at(node_pos).type == CELL_TYPE_VOID)
-        {
+        if(node_pos == NO_INDEX || this->tissue_nodes.at(node_pos).type == CELL_TYPE_VOID) {
             LOG::Warning(true, "ExternalActivation(): Node id ", node_ids[i], " is VOID or out of bounds. Activation ignored.");
             continue;
         }
-        // CellEvent * e = this->tissue_nodes.at(node_pos).ScheduleExternalActivation(activation_time, beat_n);
-        // if(e != nullptr)
-        //     this->event_queue.InsertCellEvent(e);
         this->propagation_solver.ScheduleExternalActivation(*this, &this->tissue_nodes.at(node_pos), activation_time, beat_n);
-
-        // std::cout
-        //     << "[DEBUG ExternalActivation] node=" << node_pos
-        //     << " time=" << activation_time
-        //     << " beat=" << beat_n
-        //     << std::endl;
-
     }
 }
 

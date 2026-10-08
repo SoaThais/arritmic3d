@@ -98,86 +98,167 @@ def create_tissue(grid, params):
     return tissue
 
 
+# def run_simulation(case_dir, cfg, debug_level=0):
+
+#     # Sensors output directory
+#     sensors_dir = os.path.join(case_dir, "sensors")
+
+#     vtk_file = cfg['VTK_INPUT_FILE']
+
+#     # keep the original file name for saving the output
+#     out_file_name = os.path.splitext(os.path.basename(vtk_file))[0]
+#     out_ext = cfg['VTK_OUTPUT_FORMAT']
+
+#     # Load the grid from the VTK file
+#     grid = load_grid(vtk_file)
+
+#     # Create the tissue from the grid, passing the loaded configuration dict
+#     tissue = create_tissue(grid, cfg)
+#     indexes = tissue.GetNodeIndex()
+#     tissue_size = tissue.size()
+
+#     # Set the timer for saving the VTK files (times in ms)
+#     tissue.SetTimer(
+#         arritmic3d.SystemEventType.FILE_WRITE,
+#         cfg['VTK_OUTPUT_PERIOD'],
+#         initial_time=cfg['VTK_OUTPUT_INITIAL_TIME'])
+
+#     # Schedule the activation protocol
+#     activations = schedule_activation(cfg, grid, tissue)
+
+#     time = tissue.GetTime()
+
+#     while time < cfg['SIMULATION_DURATION']:
+#         tick = tissue.update(debug_level)
+#         time = tissue.GetTime()
+
+#         if tick == arritmic3d.SystemEventType.EXT_ACTIVATION:
+#             if time in activations:
+#                 initial_nodes = activations[time][0]
+#                 beat = activations[time][1]
+#                 tissue.ExternalActivation(initial_nodes, time, beat)
+#                 print("Beat at time:", time, flush=True)
+
+#         elif tick == arritmic3d.SystemEventType.FILE_WRITE:
+#             fields = cfg['VTK_OUTPUT_FIELDS']
+#             for f in fields:
+#                 if f not in grid.point_data:
+#                     grid.point_data[f] = np.zeros(tissue_size)
+
+#             # We get the info from the actual tissue nodes and write them in their place
+#             if 'State' in fields:
+#                 np.put(grid.point_data['State'], indexes, tissue.GetStatesIndexed())
+#             if 'APD' in fields:
+#                 np.put(grid.point_data['APD'], indexes, tissue.GetAPDIndexed())
+#             if 'DI' in fields:
+#                 np.put(grid.point_data['DI'], indexes, tissue.GetLastDIIndexed())
+#             if 'CV' in fields:
+#                 np.put(grid.point_data['CV'], indexes, tissue.GetCVIndexed())
+#             if 'AP' in fields:
+#                 np.put(grid.point_data['AP'], indexes, tissue.GetAPIndexed())
+#             if 'LAT' in fields:
+#                 np.put(grid.point_data['LAT'], indexes, tissue.GetLATIndexed())
+#             if 'Beat' in fields:
+#                 np.put(grid.point_data['Beat'], indexes, tissue.GetBeatIndexed())
+#             grid.field_data['Time'] = time
+
+#             clean_grid = grid.threshold(0.5, scalars="restitution_model", all_scalars=True)
+#             clean_grid.save(f"{os.path.join(case_dir, out_file_name)}_{int(time):05d}.{out_ext}")
+
+#             # Incremental sensor data saving
+#             sensor_data = tissue.GetSensorInfo()
+#             if sensor_data:
+#                 sensor_names = tissue.GetSensorDataNames()
+#                 WriteAllSensorData(sensors_dir, sensor_data, sensor_names)
+
+#     # Save sensor data to CSV files in <case_dir>/sensors/
+#     sensor_data = tissue.GetSensorInfo()
+#     if sensor_data:
+#         sensor_names = tissue.GetSensorDataNames()
+#         WriteAllSensorData(sensors_dir, sensor_data, sensor_names)
+#         print(f"Sensor data saved to {sensors_dir}", flush=True)
+
 def run_simulation(case_dir, cfg, debug_level=0):
 
     # Sensors output directory
     sensors_dir = os.path.join(case_dir, "sensors")
 
     vtk_file = cfg['VTK_INPUT_FILE']
-
-    # keep the original file name for saving the output
     out_file_name = os.path.splitext(os.path.basename(vtk_file))[0]
     out_ext = cfg['VTK_OUTPUT_FORMAT']
 
-    # Load the grid from the VTK file
+    # Load input grid
     grid = load_grid(vtk_file)
 
-    # Create the tissue from the grid, passing the loaded configuration dict
+    # Create tissue
     tissue = create_tissue(grid, cfg)
     indexes = tissue.GetNodeIndex()
     tissue_size = tissue.size()
 
-    # Set the timer for saving the VTK files (times in ms)
-    tissue.SetTimer(
-        arritmic3d.SystemEventType.FILE_WRITE,
-        cfg['VTK_OUTPUT_PERIOD'],
-        initial_time=cfg['VTK_OUTPUT_INITIAL_TIME'])
+    # Configure periodic VTK output
+    tissue.SetTimer(arritmic3d.SystemEventType.FILE_WRITE, cfg['VTK_OUTPUT_PERIOD'], initial_time=cfg['VTK_OUTPUT_INITIAL_TIME'])
 
-    # Schedule the activation protocol
-    activations = schedule_activation(cfg, grid, tissue)
+    # Schedule all external activations in C++
+    schedule_activation(cfg, grid, tissue)
 
-    time = tissue.GetTime()
+    # Output callback: called by C++ at FILE_WRITE events
+    def write_output(time):
 
-    while time < cfg['SIMULATION_DURATION']:
-        tick = tissue.update(debug_level)
-        time = tissue.GetTime()
+        fields = cfg['VTK_OUTPUT_FIELDS']
 
-        if tick == arritmic3d.SystemEventType.EXT_ACTIVATION:
-            if time in activations:
-                initial_nodes = activations[time][0]
-                beat = activations[time][1]
-                tissue.ExternalActivation(initial_nodes, time, beat)
-                print("Beat at time:", time, flush=True)
+        for field in fields:
+            if field not in grid.point_data:
+                grid.point_data[field] = np.zeros(tissue_size)
 
-        elif tick == arritmic3d.SystemEventType.FILE_WRITE:
-            fields = cfg['VTK_OUTPUT_FIELDS']
-            for f in fields:
-                if f not in grid.point_data:
-                    grid.point_data[f] = np.zeros(tissue_size)
+        # Copy tissue data into the corresponding grid nodes
+        if 'State' in fields:
+            np.put(grid.point_data['State'], indexes, tissue.GetStatesIndexed())
 
-            # We get the info from the actual tissue nodes and write them in their place
-            if 'State' in fields:
-                np.put(grid.point_data['State'], indexes, tissue.GetStatesIndexed())
-            if 'APD' in fields:
-                np.put(grid.point_data['APD'], indexes, tissue.GetAPDIndexed())
-            if 'DI' in fields:
-                np.put(grid.point_data['DI'], indexes, tissue.GetLastDIIndexed())
-            if 'CV' in fields:
-                np.put(grid.point_data['CV'], indexes, tissue.GetCVIndexed())
-            if 'AP' in fields:
-                np.put(grid.point_data['AP'], indexes, tissue.GetAPIndexed())
-            if 'LAT' in fields:
-                np.put(grid.point_data['LAT'], indexes, tissue.GetLATIndexed())
-            if 'Beat' in fields:
-                np.put(grid.point_data['Beat'], indexes, tissue.GetBeatIndexed())
-            grid.field_data['Time'] = time
+        if 'APD' in fields:
+            np.put(grid.point_data['APD'], indexes, tissue.GetAPDIndexed())
 
-            clean_grid = grid.threshold(0.5, scalars="restitution_model", all_scalars=True)
-            clean_grid.save(f"{os.path.join(case_dir, out_file_name)}_{int(time):05d}.{out_ext}")
+        if 'DI' in fields:
+            np.put(grid.point_data['DI'], indexes, tissue.GetLastDIIndexed())
 
-            # Incremental sensor data saving
-            sensor_data = tissue.GetSensorInfo()
-            if sensor_data:
-                sensor_names = tissue.GetSensorDataNames()
-                WriteAllSensorData(sensors_dir, sensor_data, sensor_names)
+        if 'CV' in fields:
+            np.put(grid.point_data['CV'], indexes, tissue.GetCVIndexed())
 
-    # Save sensor data to CSV files in <case_dir>/sensors/
+        if 'AP' in fields:
+            np.put(grid.point_data['AP'], indexes, tissue.GetAPIndexed())
+
+        if 'LAT' in fields:
+            np.put(grid.point_data['LAT'], indexes, tissue.GetLATIndexed())
+
+        if 'Beat' in fields:
+            np.put(grid.point_data['Beat'], indexes, tissue.GetBeatIndexed())
+
+        grid.field_data['Time'] = time
+
+        # Preserve the original threshold and output format
+        clean_grid = grid.threshold(0.5, scalars = "restitution_model", all_scalars = True)
+
+        output_file = (f"{os.path.join(case_dir, out_file_name)}_" f"{int(time):05d}.{out_ext}")
+
+        clean_grid.save(output_file)
+
+        # Incremental sensor data saving
+        sensor_data = tissue.GetSensorInfo()
+
+        if sensor_data:
+            sensor_names = tissue.GetSensorDataNames()
+            WriteAllSensorData(sensors_dir, sensor_data, sensor_names)
+
+    # Run the entire simulation with one Python call.
+    # The event loop is now inside C++.
+    tissue.Run(cfg['SIMULATION_DURATION'], write_output, debug_level)
+
+    # Save final sensor data
     sensor_data = tissue.GetSensorInfo()
+
     if sensor_data:
         sensor_names = tissue.GetSensorDataNames()
         WriteAllSensorData(sensors_dir, sensor_data, sensor_names)
         print(f"Sensor data saved to {sensors_dir}", flush=True)
-
 
 def get_arg_parser():
     """

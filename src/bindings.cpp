@@ -105,7 +105,17 @@ PYBIND11_MODULE(MODULE_NAME, m) {
         .def("LoadState", &CardiacTissue<T_AP, T_CV>::LoadState,
              "Load the state of the tissue from a binary file")
         .def("SetInitialAPD", &CardiacTissue<T_AP, T_CV>::SetInitialAPD)
-        .def("SetDebugLevel", &CardiacTissue<T_AP, T_CV>::SetDebugLevel);
+        .def("SetDebugLevel", &CardiacTissue<T_AP, T_CV>::SetDebugLevel)
+
+        .def("Run", [](CardiacTissue<T_AP, T_CV>& tissue, float end_time, py::object callback, int debug) {
+               if (callback.is_none()) {
+                    tissue.Run(end_time, nullptr, debug);
+               } else {
+                    py::function output_callback = callback.cast<py::function>();
+                    tissue.Run(end_time,[output_callback](float time) {output_callback(time);}, debug);
+               }
+          }, py::arg("end_time"), py::arg("output_callback") = py::none(), py::arg("debug") = 0, "Run the simulation until end_time.")
+        .def("ScheduleActivation", &CardiacTissue<T_AP, T_CV>::ScheduleActivation, py::arg("nodes"), py::arg("activation_time"), py::arg("beat"));
 
 }
 
