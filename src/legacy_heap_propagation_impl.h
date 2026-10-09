@@ -1,23 +1,118 @@
 #ifndef LEGACY_HEAP_PROPAGATION_IMPL_H
 #define LEGACY_HEAP_PROPAGATION_IMPL_H
 
+// template <typename APM, typename CVM>
+// void LegacyHeapPropagation<APM, CVM>::Initialize(Tissue& tissue) {
+
+//     propagation_states.clear();
+//     propagation_states.resize(tissue.tissue_nodes.size());
+
+//     for(size_t i = 0; i < tissue.tissue_nodes.size(); ++i) {
+
+//         auto& state = propagation_states[i];
+
+//         state.next_activation_time = MAX_TIME;
+//         state.activation_parent = nullptr;
+//         state.activation_beat = -1;
+//         state.external_activation = false;
+
+//         state.next_activation_event   = tissue.event_queue.GetEvent(i, CellEventType::ACTIVATION);
+//         state.next_deactivation_event = tissue.event_queue.GetEvent(i, CellEventType::DEACTIVATION);
+//     }
+// }
+
 template <typename APM, typename CVM>
 void LegacyHeapPropagation<APM, CVM>::Initialize(Tissue& tissue) {
-
-    propagation_states.clear();
-    propagation_states.resize(tissue.tissue_nodes.size());
-
-    for(size_t i = 0; i < tissue.tissue_nodes.size(); ++i) {
-
-        auto& state = propagation_states[i];
-
+    propagation_states.assign(tissue.tissue_nodes.size(), PropagationState{});
+    for(auto& state : propagation_states) {
         state.next_activation_time = MAX_TIME;
         state.activation_parent = nullptr;
         state.activation_beat = -1;
         state.external_activation = false;
+    }
+    BindEvents(tissue);
+}
 
-        state.next_activation_event   = tissue.event_queue.GetEvent(i, CellEventType::ACTIVATION);
-        state.next_deactivation_event = tissue.event_queue.GetEvent(i, CellEventType::DEACTIVATION);
+template <typename APM, typename CVM>
+void LegacyHeapPropagation<APM, CVM>::BindEvents(Tissue& tissue) {
+    if(propagation_states.size() != tissue.tissue_nodes.size())
+        throw std::runtime_error("LegacyHeapPropagation::BindEvents: node count mismatch.");
+    for(size_t i = 0; i < propagation_states.size(); ++i) {
+        propagation_states[i].next_activation_event =
+            tissue.event_queue.GetEvent(i, CellEventType::ACTIVATION);
+        propagation_states[i].next_deactivation_event =
+            tissue.event_queue.GetEvent(i, CellEventType::DEACTIVATION);
+    }
+}
+
+template <typename APM, typename CVM>
+void LegacyHeapPropagation<APM, CVM>::SaveState(std::ofstream& f, const Tissue& tissue) const {
+    
+    tissue.event_queue.SaveState(f, tissue.tissue_nodes);
+
+    const size_t n_states = propagation_states.size();
+
+    if(n_states != tissue.tissue_nodes.size())
+        throw std::runtime_error("LegacyHeapPropagation::SaveState: node count mismatch.");
+    
+    f.write(reinterpret_cast<const char*>(&n_states), sizeof(n_states));
+    
+    for(const auto& state : propagation_states) {
+
+        f.write(reinterpret_cast<const char*>(&state.next_activation_time), sizeof(state.next_activation_time));
+        size_t parent_index = std::numeric_limits<size_t>::max();
+        
+        if(state.activation_parent != nullptr) {
+
+            const Node* begin = tissue.tissue_nodes.data();
+            const Node* end = begin + tissue.tissue_nodes.size();
+
+            if(state.activation_parent < begin || state.activation_parent >= end)
+                throw std::runtime_error("LegacyHeapPropagation::SaveState: activation parent is outside tissue.");
+            
+            parent_index = static_cast<size_t>(state.activation_parent - begin);
+        }
+
+        f.write(reinterpret_cast<const char*>(&parent_index), sizeof(parent_index));
+        f.write(reinterpret_cast<const char*>(&state.activation_beat), sizeof(state.activation_beat));
+        f.write(reinterpret_cast<const char*>(&state.external_activation), sizeof(state.external_activation));
+    }
+}
+
+template <typename APM, typename CVM>
+void LegacyHeapPropagation<APM, CVM>::LoadState(std::ifstream& f, Tissue& tissue) {
+    
+    tissue.event_queue.LoadState(f, tissue.tissue_nodes);
+
+    size_t n_states = 0;
+    f.read(reinterpret_cast<char*>(&n_states), sizeof(n_states));
+
+    if(!f || n_states != tissue.tissue_nodes.size())
+        throw std::runtime_error("LegacyHeapPropagation::LoadState: checkpoint node count mismatch or truncated state.");
+
+    propagation_states.assign(n_states, PropagationState{});
+
+    for(size_t i = 0; i < n_states; ++i) {
+
+        auto& state = propagation_states[i];
+        size_t parent_index = std::numeric_limits<size_t>::max();
+
+        f.read(reinterpret_cast<char*>(&state.next_activation_time), sizeof(state.next_activation_time));
+        f.read(reinterpret_cast<char*>(&parent_index), sizeof(parent_index));
+        f.read(reinterpret_cast<char*>(&state.activation_beat), sizeof(state.activation_beat));
+        f.read(reinterpret_cast<char*>(&state.external_activation), sizeof(state.external_activation));
+        
+        if(!f)
+            throw std::runtime_error("LegacyHeapPropagation::LoadState: truncated propagation state.");
+        
+        if(parent_index != std::numeric_limits<size_t>::max()) {
+            if(parent_index >= tissue.tissue_nodes.size())
+                throw std::runtime_error("LegacyHeapPropagation::LoadState: invalid activation-parent index.");
+            state.activation_parent = &tissue.tissue_nodes[parent_index];
+        } else {
+            state.activation_parent = nullptr;
+        }
+        
     }
 }
 

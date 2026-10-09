@@ -39,7 +39,7 @@ class BasicTissue
 public:
 
     enum class FiberOrientation {ISOTROPIC, HOMOGENEOUS, HETEROGENEOUS};
-    constexpr static int SAVE_VERSION = 1;  ///< Version of the BasicTissue class for state saving/loading.
+    constexpr static int SAVE_VERSION = 2;  ///< Version of the BasicTissue class for state saving/loading.
     using Node = NodeT<APM,CVM>;
     friend class NodeT<APM,CVM>;
 
@@ -174,8 +174,13 @@ public:
 
 protected:
 
-    virtual void OnInitComplete() {
-    }
+    virtual void OnInitComplete() {}
+
+    // Derived classes can append solver-specific state after the common tissue state.
+    virtual void SaveAdditionalState(std::ofstream &) const {}
+    virtual void LoadAdditionalState(std::ifstream &) {}
+    // Called after all checkpoint data has been restored; must not reset restored state.
+    virtual void OnStateLoaded() {}
 
     // Geometry
     FiberOrientation        tissue_fiber_orientation;
@@ -914,15 +919,20 @@ void BasicTissue<APM,CVM>::SaveState(const std::string & filename) const
     // Save parameters pool
     parameters_pool.SaveState(state_file);
     // Save event queue
-    event_queue.SaveState(state_file, tissue_nodes);
+    // event_queue.SaveState(state_file, tissue_nodes);
     // Save system event scheduler
     system_event_scheduler.SaveState(state_file);
 
     // Save each node
-    for(const auto & node : tissue_nodes)
-    {
+    for(const auto & node : tissue_nodes) {
         // node.SaveState(state_file, parameters_pool, event_queue);
         node.SaveState(state_file, parameters_pool);
+    }
+
+    SaveAdditionalState(state_file);
+
+    if (!state_file) {
+        throw std::runtime_error("Error saving additional tissue state.");
     }
 
     state_file.close();
@@ -962,7 +972,7 @@ void BasicTissue<APM,CVM>::LoadState(const std::string & filename)
     parameters_pool.LoadState(state_file);
     LOG::Info(debug_level > 0, parameters_pool.Info());
     // Load event queue
-    event_queue.LoadState(state_file, tissue_nodes);
+    // event_queue.LoadState(state_file, tissue_nodes);
     // Load system event scheduler
     system_event_scheduler.LoadState(state_file);
 
@@ -977,7 +987,15 @@ void BasicTissue<APM,CVM>::LoadState(const std::string & filename)
     // Restore the node index.
     ReconstructIndex();
 
-    OnInitComplete();
+    // OnInitComplete();
+
+    LoadAdditionalState(state_file);
+
+    if (!state_file) {
+        throw std::runtime_error("Error loading additional tissue state.");
+    }   
+    
+    OnStateLoaded();
 
     state_file.close();
 }

@@ -53,6 +53,10 @@ class LegacyHeapPropagation {
         LegacyHeapPropagation() = default;
 
         void Initialize(Tissue& tissue);
+        // Reconnect event pointers without resetting restored propagation bookkeeping.
+        void BindEvents(Tissue& tissue);
+        void SaveState(std::ofstream& f, const Tissue& tissue) const;
+        void LoadState(std::ifstream& f, Tissue& tissue);
 
         /**
         * @brief Processa um evento celular usando o algoritmo legado.
