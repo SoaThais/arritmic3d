@@ -3,12 +3,14 @@
 
 #include <vector>
 #include <cassert>
+#include <cstddef>
+#include <fstream>
 
 #include "geometry.h"
 #include "cell_event_queue.h"
+#include "front_propagation_solver.h"
 
 using std::vector;
-
 
 /**
  * @brief Encapsula a implementação atual da propagação.
@@ -33,7 +35,7 @@ using std::vector;
  * baseada em FIM.
  */
 template <typename APM, typename CVM>
-class LegacyHeapPropagation {
+class LegacyHeapPropagation : public FrontPropagationSolver<CardiacTissue<APM, CVM>> {
 
     public:
 
@@ -52,11 +54,22 @@ class LegacyHeapPropagation {
 
         LegacyHeapPropagation() = default;
 
-        void Initialize(Tissue& tissue);
+        void Initialize(Tissue& tissue) override;
+        // void Reset(Tissue& tissue) override;
+
+        float NextEventTime() const override;
+        bool HasPendingWork() const override;
+
+        std::size_t NextEventNodeIndex(const Tissue& tissue) const override;
+
+        std::size_t AdvanceNext(Tissue& tissue) override;
+
+        void Stimulate(Tissue& tissue, std::size_t node_index, float activation_time, int beat) override;
+
         // Reconnect event pointers without resetting restored propagation bookkeeping.
         void BindEvents(Tissue& tissue);
-        void SaveState(std::ofstream& f, const Tissue& tissue) const;
-        void LoadState(std::ifstream& f, Tissue& tissue);
+        void SaveState(std::ofstream& f, const Tissue& tissue) const override;
+        void LoadState(std::ifstream& f, Tissue& tissue) override;
 
         /**
         * @brief Processa um evento celular usando o algoritmo legado.
@@ -66,10 +79,11 @@ class LegacyHeapPropagation {
         */
         void ProcessEvent(Tissue& tissue, CellEvent* ev);
 
-        CellEvent* ScheduleExternalActivation(Tissue& tissue, Node* node, float activation_time, int beat_n);
+        void ScheduleExternalActivation(Tissue& tissue, Node* node, float activation_time, int beat_n);
 
     private:
 
+        CellEventQueue<Node>     event_queue;
         vector<PropagationState> propagation_states;
 
         size_t NodeIndex(Tissue& tissue, Node* node) const;

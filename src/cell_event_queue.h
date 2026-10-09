@@ -321,10 +321,14 @@ public:
     {
         assert(!IsEmpty() && "CellEventQueue::ExtractFirstCell: Queue is empty!");
 
-        // Node event out of the queue
-        tree[0]->position_in_tree = -1;
+        CellEvent* first = tree[0];
+        first->position_in_tree = -1;
 
-        // Remove the first element from the queue
+        if (tree.size() == 1) {
+            tree.pop_back();
+            return;
+        }
+
         tree[0] = tree.back();
         tree[0]->position_in_tree = 0;
         tree.pop_back();

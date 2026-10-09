@@ -17,7 +17,7 @@
 
 #include "geometry.h"
 #include "node.h"
-#include "cell_event_queue.h"
+// #include "cell_event_queue.h"
 #include "error.h"
 #include "sensor_dict.h"
 #include "system_event_scheduler.h"
@@ -186,7 +186,7 @@ protected:
     FiberOrientation        tissue_fiber_orientation;
     Geometry                tissue_geometry;
     vector<Node>            tissue_nodes;
-    CellEventQueue<Node>    event_queue;
+    // CellEventQueue<Node>    event_queue;
     SystemEventScheduler    system_event_scheduler;
     size_t grid_size;       ///< Total number of nodes in the tissue (including CORE nodes).
     int n_live_nodes = 0;   ///< Number of nodes that are not CORE
@@ -346,8 +346,8 @@ void BasicTissue<APM,CVM>::Init(const vector<CellType> & cell_types_, vector<Nod
     // Node parameters
     ChangeParameters(parameters_);
 
-    // Initialize the event queue
-    event_queue.Init(tissue_nodes, n_live_nodes);
+    // // Initialize the event queue
+    // event_queue.Init(tissue_nodes, n_live_nodes);
 
     // // Link each node with its events.
     // for(size_t i = 0; i < tissue_nodes.size(); i++)

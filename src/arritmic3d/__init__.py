@@ -11,7 +11,7 @@ __license__ = "LGPL-3.0-or-later"
 
 # Import the compiled C++ module
 try:
-    from ._core import CardiacTissue, SystemEventType
+    from ._core import CardiacTissue, SystemEventType, PropagationSolverType
     # Expose arritmic3d and test_case lazily (avoid exposing submodules in package namespace)
     def __getattr__(name):
         if name == "arritmic3d":
@@ -42,6 +42,7 @@ except ImportError as e:
 __all__ = [
     "CardiacTissue",
     "SystemEventType",
+    "PropagationSolverType",
     "__version__",
     "arritmic3d",
     "test_case",

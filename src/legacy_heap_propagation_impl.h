@@ -1,54 +1,94 @@
 #ifndef LEGACY_HEAP_PROPAGATION_IMPL_H
 #define LEGACY_HEAP_PROPAGATION_IMPL_H
 
-// template <typename APM, typename CVM>
-// void LegacyHeapPropagation<APM, CVM>::Initialize(Tissue& tissue) {
-
-//     propagation_states.clear();
-//     propagation_states.resize(tissue.tissue_nodes.size());
-
-//     for(size_t i = 0; i < tissue.tissue_nodes.size(); ++i) {
-
-//         auto& state = propagation_states[i];
-
-//         state.next_activation_time = MAX_TIME;
-//         state.activation_parent = nullptr;
-//         state.activation_beat = -1;
-//         state.external_activation = false;
-
-//         state.next_activation_event   = tissue.event_queue.GetEvent(i, CellEventType::ACTIVATION);
-//         state.next_deactivation_event = tissue.event_queue.GetEvent(i, CellEventType::DEACTIVATION);
-//     }
-// }
-
 template <typename APM, typename CVM>
 void LegacyHeapPropagation<APM, CVM>::Initialize(Tissue& tissue) {
+    
+    event_queue.Init(tissue.tissue_nodes, tissue.GetNumLiveNodes());
+
     propagation_states.assign(tissue.tissue_nodes.size(), PropagationState{});
-    for(auto& state : propagation_states) {
-        state.next_activation_time = MAX_TIME;
-        state.activation_parent = nullptr;
-        state.activation_beat = -1;
-        state.external_activation = false;
-    }
+    
+    // for(auto& state : propagation_states) {
+    //     state.next_activation_time = MAX_TIME;
+    //     state.activation_parent = nullptr;
+    //     state.activation_beat = -1;
+    //     state.external_activation = false;
+    // }
+
     BindEvents(tissue);
 }
 
 template <typename APM, typename CVM>
 void LegacyHeapPropagation<APM, CVM>::BindEvents(Tissue& tissue) {
+
     if(propagation_states.size() != tissue.tissue_nodes.size())
         throw std::runtime_error("LegacyHeapPropagation::BindEvents: node count mismatch.");
+    
     for(size_t i = 0; i < propagation_states.size(); ++i) {
-        propagation_states[i].next_activation_event =
-            tissue.event_queue.GetEvent(i, CellEventType::ACTIVATION);
-        propagation_states[i].next_deactivation_event =
-            tissue.event_queue.GetEvent(i, CellEventType::DEACTIVATION);
+        propagation_states[i].next_activation_event   = event_queue.GetEvent(i, CellEventType::ACTIVATION);
+        propagation_states[i].next_deactivation_event = event_queue.GetEvent(i, CellEventType::DEACTIVATION);
     }
+}
+
+template <typename APM, typename CVM>
+float LegacyHeapPropagation<APM, CVM>::NextEventTime() const {
+
+    if (event_queue.IsEmpty())
+        return MAX_TIME;
+
+    return event_queue.GetFirstCell()->event_time;
+}
+
+template <typename APM, typename CVM>
+bool LegacyHeapPropagation<APM, CVM>::HasPendingWork() const {
+    return !event_queue.IsEmpty();
+}
+
+template <typename APM, typename CVM>
+std::size_t LegacyHeapPropagation<APM, CVM>::NextEventNodeIndex(const Tissue& tissue) const {
+    
+    if (event_queue.IsEmpty())
+        throw std::runtime_error("LegacyHeapPropagation::NextEventNodeIndex: empty event queue.");
+
+    CellEvent* ev = event_queue.GetFirstCell();
+
+    const Node* begin = tissue.tissue_nodes.data();
+    const Node* end = begin + tissue.tissue_nodes.size();
+
+    if (ev->cell_node < begin || ev->cell_node >= end)
+        throw std::runtime_error("LegacyHeapPropagation::NextEventNodeIndex: invalid event node.");
+
+    return static_cast<std::size_t>(ev->cell_node - begin);
+}
+
+template <typename APM, typename CVM>
+std::size_t LegacyHeapPropagation<APM, CVM>::AdvanceNext(Tissue& tissue) {
+    
+    if (event_queue.IsEmpty())
+        return 0;
+
+    CellEvent* ev       = event_queue.GetFirstCell();
+    tissue.tissue_time  = ev->event_time;
+    event_queue.ExtractFirstCell();
+    ProcessEvent(tissue, ev);
+
+    return 1;
+}
+
+template <typename APM, typename CVM>
+void LegacyHeapPropagation<APM, CVM>::Stimulate(Tissue& tissue, std::size_t node_index, float activation_time, int beat) {
+    
+    if (node_index >= tissue.tissue_nodes.size())
+        throw std::out_of_range("LegacyHeapPropagation::Stimulate: invalid node index.");
+
+    Node* node = &tissue.tissue_nodes[node_index];
+    ScheduleExternalActivation(tissue, node, activation_time, beat);
 }
 
 template <typename APM, typename CVM>
 void LegacyHeapPropagation<APM, CVM>::SaveState(std::ofstream& f, const Tissue& tissue) const {
     
-    tissue.event_queue.SaveState(f, tissue.tissue_nodes);
+    event_queue.SaveState(f, tissue.tissue_nodes);
 
     const size_t n_states = propagation_states.size();
 
@@ -82,7 +122,7 @@ void LegacyHeapPropagation<APM, CVM>::SaveState(std::ofstream& f, const Tissue& 
 template <typename APM, typename CVM>
 void LegacyHeapPropagation<APM, CVM>::LoadState(std::ifstream& f, Tissue& tissue) {
     
-    tissue.event_queue.LoadState(f, tissue.tissue_nodes);
+    event_queue.LoadState(f, tissue.tissue_nodes);
 
     size_t n_states = 0;
     f.read(reinterpret_cast<char*>(&n_states), sizeof(n_states));
@@ -112,8 +152,10 @@ void LegacyHeapPropagation<APM, CVM>::LoadState(std::ifstream& f, Tissue& tissue
         } else {
             state.activation_parent = nullptr;
         }
-        
     }
+
+    BindEvents(tissue);
+    
 }
 
 template <typename APM, typename CVM>
@@ -156,8 +198,7 @@ LegacyHeapPropagation<APM, CVM>::ScheduleActivation(Tissue& tissue, Node* node, 
 }
 
 template <typename APM, typename CVM>
-typename LegacyHeapPropagation<APM, CVM>::CellEvent*
-LegacyHeapPropagation<APM, CVM>::ScheduleExternalActivation(Tissue& tissue, Node* node, float activation_time, int beat_n) {
+void LegacyHeapPropagation<APM, CVM>::ScheduleExternalActivation(Tissue& tissue, Node* node, float activation_time, int beat_n) {
     
     auto& state = GetState(tissue, node);
 
@@ -175,14 +216,9 @@ LegacyHeapPropagation<APM, CVM>::ScheduleExternalActivation(Tissue& tissue, Node
 
             node->received_potential = 1.0;
 
-            tissue.event_queue.InsertCellEvent(state.next_activation_event);
-
-            return state.next_activation_event;
-
+            event_queue.InsertCellEvent(state.next_activation_event);
         }
     }
-
-    return nullptr;
 }
 
 template <typename APM, typename CVM>
@@ -239,7 +275,7 @@ LegacyHeapPropagation<APM, CVM>::PropagateActivation(Tissue& tissue, Node* node,
         CellEvent* ev_neigh = ScheduleActivation(tissue, neigh, node, direct_activation_time);
 
         if (ev_neigh != nullptr) {
-            tissue.event_queue.InsertCellEvent(ev_neigh);
+            event_queue.InsertCellEvent(ev_neigh);
             inactive_neighs.push_back(neigh);
         }
     }
@@ -290,7 +326,7 @@ void LegacyHeapPropagation<APM, CVM>::ProcessEvent(Tissue& tissue, CellEvent* ev
             if (node_->Activate(tissue.tissue_time, state.activation_beat, &tissue)) {
 
                 state.next_deactivation_event->ChangeEvent(node_->recovery_time);
-                tissue.event_queue.InsertCellEvent(state.next_deactivation_event);
+                event_queue.InsertCellEvent(state.next_deactivation_event);
                 tissue.apd_variation += node_->apd_model.getDeltaAPD();
 
                 vector<Node*> inactive_neighs = PropagateActivation(tissue, node_, tissue.tissue_time);
@@ -316,7 +352,7 @@ void LegacyHeapPropagation<APM, CVM>::ProcessEvent(Tissue& tissue, CellEvent* ev
         if (state.next_activation_time < MAX_TIME) {
 
             state.next_activation_event->ChangeEvent(state.next_activation_time);
-            tissue.event_queue.InsertCellEvent(state.next_activation_event);
+            event_queue.InsertCellEvent(state.next_activation_event);
 
         }
 
@@ -361,7 +397,7 @@ void LegacyHeapPropagation<APM, CVM>::ProcessEvent(Tissue& tissue, CellEvent* ev
                 CellEvent* ev_react = ScheduleActivation(tissue, node_, parent_node_, node_excitable_at_time);
 
                 if (ev_react != nullptr) {
-                    tissue.event_queue.InsertCellEvent(ev_react);
+                    event_queue.InsertCellEvent(ev_react);
                 }
                 else {
                     node_->received_potential = 0.0;

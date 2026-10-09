@@ -12,15 +12,17 @@
 #include <fstream>
 #include <cassert>
 #include <Eigen/Dense>
+#include <functional>
+#include <stdexcept>
+#include <memory>
 
 #include "geometry.h"
 #include "node.h"
-#include "cell_event_queue.h"
 #include "error.h"
 #include "basic_tissue.h"
 #include "system_event_scheduler.h"
 #include "legacy_heap_propagation.h"
-#include <functional>
+#include "front_propagation_solver.h"
 
 using std::vector;
 
@@ -42,13 +44,22 @@ class CardiacTissue : public BasicTissue<APM,CVM>
 {
 public:
 
-    using CellEvent = Event<NodeT<APM,CVM> >;
+    // using CellEvent = Event<NodeT<APM,CVM> >;
     using Node = NodeT<APM,CVM>;
 
-    LegacyHeapPropagation<APM,CVM> propagation_solver;    
+    std::unique_ptr<FrontPropagationSolver<CardiacTissue<APM, CVM>>> propagation_solver;
 
-    CardiacTissue(int size_x_, int size_y_, int size_z_, float dx_, float dy_, float dz_) :
-                BasicTissue<APM,CVM>(size_x_, size_y_, size_z_, dx_, dy_, dz_) {}
+    CardiacTissue(int size_x_, int size_y_, int size_z_, float dx_, float dy_, float dz_, PropagationSolverType solver_type = PropagationSolverType::LegacyHeap) :
+        BasicTissue<APM,CVM>(size_x_, size_y_, size_z_, dx_, dy_, dz_) {
+        switch (solver_type) {
+
+            case PropagationSolverType::LegacyHeap:
+                propagation_solver = std::make_unique<LegacyHeapPropagation<APM, CVM>>();
+                break;
+            case PropagationSolverType::FIM:
+                throw std::runtime_error("CardiacTissue: FIM solver ainda nao implementado.");
+        }
+    }
     
     SystemEventType update(int debug = 0);
 
@@ -57,7 +68,7 @@ public:
     
     void Run(float end_time, std::function<void(float)> output_callback = nullptr, int debug = 0);
 
-    void TriggerEvent(CellEvent* ev);
+    // void TriggerEvent(CellEvent* ev);
 
     void ResetVariations() { apd_variation = 0.0; cv_variation = 0.0; }
     float GetAPDMeanVariation() const { return apd_variation / this->GetNumLiveNodes(); }
@@ -86,17 +97,18 @@ private:
 
 template <typename APM, typename CVM>
 void CardiacTissue<APM, CVM>::OnInitComplete() {
-    propagation_solver.Initialize(*this);
+    propagation_solver->Initialize(*this);
 }
 
 template <typename APM, typename CVM>
 void CardiacTissue<APM, CVM>::OnStateLoaded() {
     // LoadAdditionalState restored logical state; only reconnect pointers here.
-    propagation_solver.BindEvents(*this);
+    // propagation_solver->BindEvents(*this);
 }
 
 template <typename APM, typename CVM>
 void CardiacTissue<APM, CVM>::SaveAdditionalState(std::ofstream& f) const {
+    
     // Solver identifier makes the solver-specific payload explicit in the checkpoint.
     constexpr int solver_id = 1; // 1 = legacy heap propagation
     constexpr int solver_state_version = 1;
@@ -105,24 +117,32 @@ void CardiacTissue<APM, CVM>::SaveAdditionalState(std::ofstream& f) const {
 
     const size_t n_stimuli = external_activations.size();
     f.write(reinterpret_cast<const char*>(&n_stimuli), sizeof(n_stimuli));
+    
     for(const auto& stimulus : external_activations) {
+
         f.write(reinterpret_cast<const char*>(&stimulus.time), sizeof(stimulus.time));
         f.write(reinterpret_cast<const char*>(&stimulus.beat), sizeof(stimulus.beat));
+        
         const size_t n_nodes = stimulus.nodes.size();
         f.write(reinterpret_cast<const char*>(&n_nodes), sizeof(n_nodes));
+        
         for(size_t node_index : stimulus.nodes)
             f.write(reinterpret_cast<const char*>(&node_index), sizeof(node_index));
     }
-    propagation_solver.SaveState(f, *this);
+
+    propagation_solver->SaveState(f, *this);
 }
 
 template <typename APM, typename CVM>
 void CardiacTissue<APM, CVM>::LoadAdditionalState(std::ifstream& f) {
+    
     int solver_id = 0;
     f.read(reinterpret_cast<char*>(&solver_id), sizeof(solver_id));
+    
     constexpr int legacy_heap_solver_id = 1;
     if(!f || solver_id != legacy_heap_solver_id)
         throw std::runtime_error("CardiacTissue::LoadState: unsupported or invalid propagation solver identifier.");
+    
     int solver_state_version = 0;
     f.read(reinterpret_cast<char*>(&solver_state_version), sizeof(solver_state_version));
     if(!f || solver_state_version != 1)
@@ -132,28 +152,36 @@ void CardiacTissue<APM, CVM>::LoadAdditionalState(std::ifstream& f) {
     f.read(reinterpret_cast<char*>(&n_stimuli), sizeof(n_stimuli));
     if(!f || n_stimuli > 100000000)
         throw std::runtime_error("CardiacTissue::LoadState: invalid external-stimulus count.");
+    
     external_activations.clear();
     external_activations.reserve(n_stimuli);
-    const size_t grid_node_count = static_cast<size_t>(this->tissue_geometry.size_x) *
-                                   static_cast<size_t>(this->tissue_geometry.size_y) *
-                                   static_cast<size_t>(this->tissue_geometry.size_z);
+    
+    const size_t grid_node_count = static_cast<size_t>(this->tissue_geometry.size_x) * static_cast<size_t>(this->tissue_geometry.size_y) * static_cast<size_t>(this->tissue_geometry.size_z);
+    
     for(size_t i = 0; i < n_stimuli; ++i) {
+
         Stimuli stimulus{};
         size_t n_nodes = 0;
+
         f.read(reinterpret_cast<char*>(&stimulus.time), sizeof(stimulus.time));
         f.read(reinterpret_cast<char*>(&stimulus.beat), sizeof(stimulus.beat));
         f.read(reinterpret_cast<char*>(&n_nodes), sizeof(n_nodes));
+
         if(!f || n_nodes > grid_node_count)
             throw std::runtime_error("CardiacTissue::LoadState: invalid external-stimulus node count.");
+        
         stimulus.nodes.resize(n_nodes);
+        
         for(auto& node_index : stimulus.nodes) {
             f.read(reinterpret_cast<char*>(&node_index), sizeof(node_index));
             if(!f || node_index >= grid_node_count)
                 throw std::runtime_error("CardiacTissue::LoadState: invalid external-stimulus node index.");
         }
+        
         external_activations.push_back(std::move(stimulus));
     }
-    propagation_solver.LoadState(f, *this);
+    
+    propagation_solver->LoadState(f, *this);
 }
 
 template <typename APM, typename CVM>
@@ -208,8 +236,8 @@ void CardiacTissue<APM,CVM>::Run(float end_time, std::function<void(float)> outp
 template <typename APM,typename CVM>
 SystemEventType CardiacTissue<APM,CVM>::update(int debug) {
 
-    bool cell_empty   = this->event_queue.IsEmpty();
-    bool system_empty = this->system_event_scheduler.IsEmpty();
+    const bool cell_empty   = !propagation_solver->HasPendingWork();
+    const bool system_empty = this->system_event_scheduler.IsEmpty();
 
     if(cell_empty && system_empty)
         return SystemEventType::NO_EVENT;
@@ -223,13 +251,13 @@ SystemEventType CardiacTissue<APM,CVM>::update(int debug) {
         process_system = false;
     }
     else {
-        auto *cell_ev         = this->event_queue.GetFirstCell();
+        const float cell_time = propagation_solver->NextEventTime();
         const auto &system_ev = this->system_event_scheduler.GetFirst();
 
-        if(system_ev.event_time < cell_ev->event_time) {
+        if(system_ev.event_time < cell_time) {
             process_system = true;
         }
-        else if(system_ev.event_time > cell_ev->event_time) {
+        else if(system_ev.event_time > cell_time) {
             process_system = false;
         }
         else {
@@ -246,8 +274,8 @@ SystemEventType CardiacTissue<APM,CVM>::update(int debug) {
 
         const auto &system_ev = this->system_event_scheduler.GetFirst();
 
-        float ev_time = system_ev.event_time;
-        SystemEventType ev_type = system_ev.type;
+        const float ev_time = system_ev.event_time;
+        const SystemEventType ev_type = system_ev.type;
 
         LOG::Info(debug > 0, "System event at t=", ev_time, " type=", int(ev_type));
 
@@ -255,7 +283,7 @@ SystemEventType CardiacTissue<APM,CVM>::update(int debug) {
 
         this->system_event_scheduler.ExtractFirst();
 
-        float inc_time = this->timer.at(int(ev_type));
+        const float inc_time = this->timer.at(int(ev_type));
 
         if(inc_time > 0) {
 
@@ -264,7 +292,7 @@ SystemEventType CardiacTissue<APM,CVM>::update(int debug) {
             if(ev_type == SystemEventType::EXT_ACTIVATION)
                 priority = 0;
 
-            float new_ev_time = this->tissue_time + inc_time;
+            const float new_ev_time = this->tissue_time + inc_time;
 
             this->system_event_scheduler.Insert(new_ev_time, ev_type, priority);
         }
@@ -276,98 +304,36 @@ SystemEventType CardiacTissue<APM,CVM>::update(int debug) {
     // CELL EVENT
     // ---------------------------------------------------------
 
-    CellEvent *ev = this->event_queue.GetFirstCell();
+    const float ev_time = propagation_solver->NextEventTime();
+    const std::size_t node_index = propagation_solver->NextEventNodeIndex(*this);
 
-    float ev_time = ev->event_time;
+    Node* node = &this->tissue_nodes.at(node_index);
 
-    LOG::Info(debug > 0, "Cell event at t=", ev_time, " node=", ev->cell_node->id);
-
+    LOG::Info(debug > 0, "Cell event at t=", ev_time, " node=", node->id);
     LOG::Warning(ev_time < this->tissue_time, " t=", this->tissue_time, " older than ev.t=", ev_time);
+    LOG::Info(debug > 1, "Before processing event. Node value: ", *node);
+    LOG::Warning(node->parameters == nullptr, "Node ", node->id, " has no parameters assigned.");
 
-    this->tissue_time = ev_time;
+    // AdvanceNext updates tissue_time, removes the event from the
+    // solver queue, and processes the event.
+    const std::size_t processed = propagation_solver->AdvanceNext(*this);
 
-    this->event_queue.ExtractFirstCell();
+    if (processed == 0)
+        throw std::runtime_error("CardiacTissue::update: solver reported a pending event but did not process it.");
 
-    LOG::Info(debug > 0, "Node Event for node ", ev->cell_node->id, " Type: ", int(ev->event_type));
-
-    LOG::Info(debug > 1, "Before processing event. Node value: ", *(ev->cell_node));
-
-    LOG::Warning(ev->cell_node->parameters == nullptr, "Node ", ev->cell_node->id, " has no parameters assigned.");
-
-    TriggerEvent(ev);
-
-    // Check next cell event
-    if(!this->event_queue.IsEmpty()) {
-        auto *next_ev = this->event_queue.GetFirstCell();
-        LOG::Error(next_ev->event_time < this->tissue_time, " We skipped an event!");
+    // Check that the solver did not leave an event in the past.
+    if (propagation_solver->HasPendingWork()) {
+        LOG::Error(propagation_solver->NextEventTime() < this->tissue_time, " We skipped an event!");
     }
 
-    LOG::Info(debug > 1, "After processing event. Node value: ", *(ev->cell_node));
+    LOG::Info(debug > 1, "After processing event. Node value: ", *node);
 
-    if(ev->cell_node->parameters->sensor) {
-        // this->sensor_dict.AddData(ev->cell_node->id, ev->cell_node->GetData(ev, this->tissue_time));
-        this->sensor_dict.AddData(ev->cell_node->id, ev->cell_node->GetData(this->tissue_time));
+    if (node->parameters != nullptr && node->parameters->sensor) {
+        this->sensor_dict.AddData(node->id, node->GetData(this->tissue_time));
     }
 
     return SystemEventType::NODE_EVENT;
-
-    // if(!this->event_queue.IsEmpty())
-    // {
-    //     auto [ev_time, ev_type] = this->event_queue.GetInfo();
-    //     LOG::Info(debug > 0, "Event at t=", ev_time, " type=", (int)ev_type);
-
-    //     float new_t = ev_time;
-    //     LOG::Warning(new_t < this->tissue_time, " t=", this->tissue_time, " older than   ev.t=", new_t);
-
-    //     this->tissue_time = new_t;
-
-    //     // System event
-    //     if(ev_type != SystemEventType::NODE_EVENT)
-    //     {
-    //         this->event_queue.ExtractFirstSystem();
-
-    //         float inc_time = this->timer.at(int(ev_type));
-    //         if(inc_time > 0)
-    //         {
-    //             int priority = 1;
-    //             if(ev_type == SystemEventType::EXT_ACTIVATION)
-    //                 priority = 0;
-    //             float new_ev_time = this->tissue_time + inc_time;
-    //             this->event_queue.InsertSystemEvent(new_ev_time, ev_type, priority);
-    //         }
-
-    //         return ev_type;
-    //     }
-
-    //     // Node event
-    //     CellEvent * ev = this->event_queue.GetFirstCell();
-    //     this->event_queue.ExtractFirstCell();
-    //     LOG::Info(debug > 0, "Node Event for node ", ev->cell_node->id, " Type: ", int(ev->event_type));
-    //     LOG::Info(debug > 1, "Before processing event. Node value: ", *(ev->cell_node) );
-    //     LOG::Warning(ev->cell_node->parameters == nullptr, "Node ", ev->cell_node->id, " has no parameters assigned.");
-
-    //     TriggerEvent(ev);
-    //     //n_cells_updated++;
-
-    //     // Check next event
-    //     if(!this->event_queue.IsEmpty())
-    //     {
-    //         auto ev_info = this->event_queue.GetInfo();
-    //         LOG::Error(std::get<0>(ev_info) < this->tissue_time, " We skiped an event!");
-    //     }
-
-    //     LOG::Info(debug > 1, "After processing event. Node value: ", *(ev->cell_node) );
-
-    //     // Store info in case of sensor node
-    //     if(ev->cell_node->parameters->sensor)
-    //     {
-    //         this->sensor_dict.AddData(ev->cell_node->id, ev->cell_node->GetData(ev, this->tissue_time));
-    //     }
-
-    //     return SystemEventType::NODE_EVENT;
-    // }
-    // else
-    //     return SystemEventType::NO_EVENT;
+    
 }
 
 /**
@@ -379,191 +345,27 @@ SystemEventType CardiacTissue<APM,CVM>::update(int debug) {
 */
 template <typename APM,typename CVM>
 void CardiacTissue<APM,CVM>::ExternalActivation(const vector<size_t> & node_ids, float activation_time, int beat_n) {
+    
     for(size_t i = 0; i < node_ids.size(); i++) {
+
         auto node_pos = this->tissue_geometry.GetMemIndex_from_GridIndex(node_ids[i]);
         if(node_pos == NO_INDEX || this->tissue_nodes.at(node_pos).type == CELL_TYPE_VOID) {
             LOG::Warning(true, "ExternalActivation(): Node id ", node_ids[i], " is VOID or out of bounds. Activation ignored.");
             continue;
         }
-        this->propagation_solver.ScheduleExternalActivation(*this, &this->tissue_nodes.at(node_pos), activation_time, beat_n);
+
+        this->propagation_solver->Stimulate(*this, node_pos, activation_time, beat_n);
     }
 }
 
-/**
- * Process the event in the node.
- * From Node.pde: dispara_evento
-*/
-template <typename APM,typename CVM>
-void CardiacTissue<APM,CVM>::TriggerEvent(CellEvent* ev) {
-
-    propagation_solver.ProcessEvent(*this, ev);
-
-    // Node * node_ = ev->cell_node;
-
-    // // Time must match
-    // LOG::Warning(ev->event_time != this->tissue_time, "TriggerEvent(): In node ", node_->id,
-    //         "Event time mismatch. Event time is ", ev->event_time, " while current time is ", this->tissue_time );
-
-    // // Activation
-    // if ( this->tissue_time == node_->next_activation_time )
-    // {
-    //     // Safety factor
-    //     if ( ! node_->external_activation && node_->received_potential < node_->parameters->min_potential*node_->parameters->safety_factor)
-    //     {
-    //         // No activation. Potential too low
-    //         LOG::Info(true, "TriggerEvent(): Safety factor acting. Node ", node_->id, " NOT activated with total potential ", node_->received_potential,
-    //              " does not reach the minimum: ", node_->parameters->min_potential);
-
-    //         // Deactivate the node. There are situations where this is not correct as more potentials sent to the node may activate it, but this is the behaviour of pde version.
-    //         node_->received_potential = 0.0;    // @todo Check
-    //         node_->next_activation_time = MAX_TIME;
-    //     }
-    //     else
-    //     {
-    //         /// @todo Missing reentry checks
-    //         // The Node is activated.
-    //         if (node_->Activate(this->tissue_time, this))
-    //         {
-    //             // Once activated and computed the APD, we set the next deactivation event
-    //             node_->next_deactivation_event->ChangeEvent(node_->next_deactivation_time);
-    //             this->event_queue.InsertCellEvent(node_->next_deactivation_event); // @todo Check
-
-    //             // We accumulate the variations
-    //             apd_variation += node_->apd_model.getDeltaAPD();
-
-    //             // The potential is sent to inactive neighbours.
-    //             vector<Node*> inactive_neighs;
-    //             for (unsigned int i = 0; i < this->tissue_geometry.num_neighbours; ++i )
-    //             {
-    //                 // We get the neighbour node
-    //                 // Danger! May go out of the array of Node
-    //                 Node* neigh = this->NodeDisplace(node_, this->tissue_geometry.displacement[i]);
-    //                 if(neigh == nullptr)    // We are in a void node, we skip it
-    //                     continue;
-    //                 assert(neigh >= this->tissue_nodes.data() && neigh < this->tissue_nodes.data() + this->tissue_nodes.size());
-
-    //                 // We skip void nodes
-    //                 if ( neigh->type == CELL_TYPE_VOID )
-    //                 {
-    //                     continue;
-    //                 }
-
-    //                 float distance = this->tissue_geometry.distance_to_neighbour[i];
-    //                 Vector3 activation_dir = - this->tissue_geometry.relative_position[i]; // @todo Maybe we should define the opposite direction in geometry
-
-    //                 // We compute the direct diffusion, through the graph.
-    //                 float direct_vel = node_->ComputeDirectionalConductionVelocity(activation_dir);
-    //                 float direct_activation_time = node_->local_activation_time + distance/direct_vel;
-
-    //                 if (neigh->GetState(this->tissue_time) == Node::CellActivationState::ACTIVE) // direct_activation_time
-    //                 { // AQUI: lanzar y depurar las ecuaciones // Nodos 137-> 249
-    //                     // We validate the activation times with the conduction velocities
-    //                     // If the neighbour is active, perhaps it activated us
-    //                     // If it activated us, its activation time cannot be earlier than
-    //                     // our activation time less the longest travel time.
-    //                     // 1. We compute the max travel time from neigh towards us.
-    //                     float neigh_min_vel = neigh->parameters->cond_veloc_transversal_reduction*neigh->conduction_vel;
-    //                     float max_travel_time = distance/neigh_min_vel;
-    //                     // 2. We compute the earliest activation time if neigh activated us.
-    //                     float neigh_earliest_possible_activation = node_->local_activation_time - max_travel_time;
-    //                     // 3. If the neighbour activated before this threshold, it could not have activate us.
-    //                     // Otherwise, we assume it could have activated us and skip this neigh.
-    //                     if(neigh->local_activation_time > neigh_earliest_possible_activation)
-    //                     {
-    //                         // LOG::Info(true, "From ", node_->id, " to ", neigh->id, " ->·<- neigh: ", neigh->local_activation_time, " newer than ", neigh_earliest_possible_activation);
-    //                         // LOG::Info(true, "    Target node ", neigh->id, " could have activated node ", node_->id, ". We skip it to prevent turnover.");
-    //                         continue;
-    //                     }
-
-    //                 }
-
-    //                 CellEvent * ev_neigh = neigh->ScheduleActivation(node_, direct_activation_time);
-
-    //                 // if ev_neigh is nullptr means it is active and rejected activation or it has an earlier activation time
-    //                 if (ev_neigh != nullptr)
-    //                 {
-    //                     this->event_queue.InsertCellEvent(ev_neigh);
-    //                     inactive_neighs.push_back(neigh); // @todo Maybe it should include nodes with earlier activation time
-    //                 }
-    //             }
-
-    //             if (inactive_neighs.size() > 0)
-    //             {
-    //                 float potential_to_send = node_->received_potential/inactive_neighs.size()*node_->parameters->safety_factor;
-    //                 for (auto neigh : inactive_neighs)
-    //                     neigh->received_potential += potential_to_send;
-    //             }
-
-    //         }
-    //         node_->next_activation_time = MAX_TIME;
-    //     }
-    // }
-
-    // if( this->tissue_time == node_->next_deactivation_time)
-    // {
-    //     // Deactivate node
-    //     node_->received_potential = 0.0;
-    //     node_->external_activation = false;
-    //     node_->next_deactivation_time = MAX_TIME;
-
-    //     if (node_->next_activation_time < MAX_TIME)
-    //     {
-    //         node_->next_activation_event->ChangeEvent(node_->next_activation_time);
-    //         this->event_queue.InsertCellEvent(node_->next_activation_event);
-    //     }
-
-    //     // After deactivation, we check for possible reactivation from neighbours.
-    //     if(this->long_apd_reactivation)
-    //     {
-    //         float node_excitable_at_time = node_->local_activation_time + 1.05*node_->apd_model.getERP(); // @todo Convert to parameter
-    //         Node* parent_node_ = nullptr;
-    //         for (unsigned int i = 0; i < this->tissue_geometry.num_neighbours; ++i )
-    //         {
-    //             // Danger! May go out of the array of Node
-    //             Node* neigh = this->NodeDisplace(node_, this->tissue_geometry.displacement[i]);
-    //             if (neigh == nullptr)
-    //                 continue;
-    //             assert(neigh >= this->tissue_nodes.data() && neigh < this->tissue_nodes.data() + this->tissue_nodes.size());
-
-    //             // We skip void nodes
-    //             if ( neigh->type != CELL_TYPE_VOID )
-    //             {
-    //                 // If neighbour is active
-    //                 if (neigh->GetState(node_excitable_at_time) == Node::CellActivationState::ACTIVE)
-    //                 {
-    //                     // If we are before a percentage of the action potential duration, we get potential
-    //                     // If neighbour still has high potential, we might reactivate the node
-    //                     float neigh_plateau_duration = neigh->local_activation_time + this->apd_plateau_duration*neigh->apd_model.getAPD(); // @todo Convert to parameter
-    //                     if (node_excitable_at_time <= neigh_plateau_duration)
-    //                     {
-    //                         node_->received_potential += 1.0; // @todo Check potential value
-    //                         // We set the parent node as the latest activated node
-    //                         if (parent_node_ == nullptr)
-    //                             parent_node_ = neigh;
-    //                         else if (parent_node_->local_activation_time < neigh->local_activation_time)
-    //                             parent_node_ = neigh;
-    //                     }
-    //                 }
-    //             }
-    //         }
-
-    //         if(node_->received_potential >= 3) // @todo Convert to parameter
-    //         {
-    //             // Reactivation
-    //             CellEvent * ev_react = node_->ScheduleActivation(parent_node_, node_excitable_at_time);
-    //             if(ev_react != nullptr)
-    //                 this->event_queue.InsertCellEvent(ev_react);
-    //             else // We reset potential
-    //                 node_->received_potential = 0.0;
-
-    //         }
-    //         else // We reset potential
-    //             node_->received_potential = 0.0;
-    //     }
-
-    // }
-
-}
+// /**
+//  * Process the event in the node.
+//  * From Node.pde: dispara_evento
+// */
+// template <typename APM,typename CVM>
+// void CardiacTissue<APM,CVM>::TriggerEvent(CellEvent* ev) {
+//     propagation_solver->ProcessEvent(*this, ev);
+// }
 
 #include "legacy_heap_propagation_impl.h"
 

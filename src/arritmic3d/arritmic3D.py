@@ -30,7 +30,7 @@ def load_grid(vtk_file):
 
     return grid
 
-def create_tissue(grid, params):
+def create_tissue(grid, params, solver_type=None):
     """ Create a tissue object from the grid.
     The grid is expected to have the following point data:
     - restitution_model: the type of each cell (e.g., 'Endocardium', 'Epicardium', 'Myocardium')
@@ -61,7 +61,10 @@ def create_tissue(grid, params):
     ncells_y = dims[1]
     ncells_z = dims[2]
 
-    tissue = arritmic3d.CardiacTissue(ncells_x, ncells_y, ncells_z, x_spacing, y_spacing, z_spacing)
+    if solver_type is None:
+        solver_type = arritmic3d.PropagationSolverType.LEGACY_HEAP
+
+    tissue = arritmic3d.CardiacTissue(ncells_x, ncells_y, ncells_z, x_spacing, y_spacing, z_spacing, solver_type)
 
     vparams = get_vectorial_parameters(tissue, dims, params)
     print("Parameters:", params, flush=True)
@@ -178,7 +181,7 @@ def create_tissue(grid, params):
 #         WriteAllSensorData(sensors_dir, sensor_data, sensor_names)
 #         print(f"Sensor data saved to {sensors_dir}", flush=True)
 
-def run_simulation(case_dir, cfg, debug_level=0):
+def run_simulation(case_dir, cfg, debug_level=0, solver_type=None):
 
     # Sensors output directory
     sensors_dir = os.path.join(case_dir, "sensors")
@@ -191,7 +194,7 @@ def run_simulation(case_dir, cfg, debug_level=0):
     grid = load_grid(vtk_file)
 
     # Create tissue
-    tissue = create_tissue(grid, cfg)
+    tissue = create_tissue(grid, cfg, solver_type)
     indexes = tissue.GetNodeIndex()
     tissue_size = tissue.size()
 
@@ -358,6 +361,13 @@ Examples:
         "--test",
         action="store_true",
         help="Run a built-in S1-S2 test case in the specified case_dir. The directory must not exist or must be empty."
+    )
+
+    parser.add_argument(
+        "--solver",
+        choices=["legacy", "fim"],
+        default="legacy",
+        help="Propagation solver: legacy heap or FIM."
     )
 
     return parser
@@ -538,7 +548,7 @@ def generate_slab_to_output(case_dir, slab_args):
     return slab_path
 
 
-def run_arritmic3D(case_dir, config : dict = {}, save_run_config=True, debug_level = 0):
+def run_arritmic3D(case_dir, config : dict = {}, save_run_config=True, debug_level = 0, solver_type=None):
     """
     Run the Arritmic3D simulation in the given case directory with the provided configuration dict
 
@@ -570,6 +580,16 @@ def run_arritmic3D(case_dir, config : dict = {}, save_run_config=True, debug_lev
     resolve_models_in_parameters(config)
     ensure_abs_paths(config)
 
+    if solver_type is None:
+        solver_type = arritmic3d.PropagationSolverType.LEGACY_HEAP
+
+    solver_names = {
+        arritmic3d.PropagationSolverType.LEGACY_HEAP: "legacy",
+        arritmic3d.PropagationSolverType.FIM: "fim",
+    }
+
+    config["PROPAGATION_SOLVER"] = solver_names[solver_type]
+
     # Save simulation configuration (relative paths) if requested
     if save_run_config:
         save_run_configuration(config, case_dir)
@@ -579,10 +599,10 @@ def run_arritmic3D(case_dir, config : dict = {}, save_run_config=True, debug_lev
     os.makedirs(sensors_dir, exist_ok=True)
 
     # Run simulation with runtime config (absolute paths)
-    run_simulation(case_dir, config, debug_level)
+    run_simulation(case_dir, config, debug_level, solver_type)
     print("Simulation finished", flush=True)
 
-def run_test_case(output_dir):
+def run_test_case(output_dir, solver_type=None):
     """
     Generate and run a built-in S1-S2 test case in the given output directory.
     Uses build_slab and the standard config/output logic.
@@ -622,7 +642,7 @@ def run_test_case(output_dir):
     ]
 
     # Use the standard config/output logic (with path conversion)
-    run_arritmic3D(output_dir, config, save_run_config=True)
+    run_arritmic3D(output_dir, config, save_run_config=True, solver_type=solver_type)
     print("Test case finished", flush=True)
 
 def main():
@@ -631,9 +651,14 @@ def main():
     # Parse known args for arritmic3D; remainder belongs to build_slab if --slab is set
     args, remainder = parser.parse_known_args()
 
+    solver_map = {
+        "legacy": arritmic3d.PropagationSolverType.LEGACY_HEAP,
+        "fim": arritmic3d.PropagationSolverType.FIM,
+    }
+
     # Handle --test option
     if args.test:
-        run_test_case(args.case_dir)
+        run_test_case(args.case_dir, solver_type=solver_map[args.solver])
         return
 
     # With --slab, do not allow --input-file (slab provides the VTK). Allow --config-file as base cfg.
@@ -658,7 +683,7 @@ def main():
         cfg["VTK_INPUT_FILE"] = slab_vtk
 
     # Execute the simulation with the prepared configuration
-    run_arritmic3D(args.case_dir, config = cfg, save_run_config = args.output_run_config)
+    run_arritmic3D(args.case_dir, config = cfg, save_run_config = args.output_run_config, solver_type=solver_map[args.solver])
 
 if __name__ == "__main__":
     main()
