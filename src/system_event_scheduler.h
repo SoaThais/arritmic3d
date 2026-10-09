@@ -55,37 +55,6 @@ class SystemEventScheduler {
             events.pop();
         }
 
-        // void SaveState(std::ofstream & f) const {
-
-        //     // Número de eventos
-        //     size_t n_system_events = events.size();
-
-        //     f.write((char *) &n_system_events, sizeof(size_t));
-
-        //     // Copia da fila para poder percorrê-la sem modificar a original
-        //     auto queue_copy = events;
-
-        //     while(!queue_copy.empty()) {
-        //         const SystemEvent & ev = queue_copy.top();
-        //         f.write((char *)&ev, sizeof(SystemEvent));
-        //         queue_copy.pop();
-        //     }
-        // }
-
-        // void LoadState(std::ifstream & f) {
-
-        //     Clear();
-
-        //     size_t n_system_events;
-        //     f.read((char *)&n_system_events, sizeof(size_t));
-
-        //     for(size_t i = 0; i < n_system_events; ++i) {
-        //         SystemEvent ev;
-        //         f.read((char *)&ev, sizeof(SystemEvent));
-        //         events.push(ev);
-        //     }
-        // }
-
         void SaveState(std::ofstream & f) const {
 
             // Número de eventos

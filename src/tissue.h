@@ -44,7 +44,6 @@ class CardiacTissue : public BasicTissue<APM,CVM>
 {
 public:
 
-    // using CellEvent = Event<NodeT<APM,CVM> >;
     using Node = NodeT<APM,CVM>;
 
     std::unique_ptr<FrontPropagationSolver<CardiacTissue<APM, CVM>>> propagation_solver;
@@ -67,8 +66,6 @@ public:
     void ExternalActivation(const vector<size_t> & nodes, float activation_time, int beat_n);
     
     void Run(float end_time, std::function<void(float)> output_callback = nullptr, int debug = 0);
-
-    // void TriggerEvent(CellEvent* ev);
 
     void ResetVariations() { apd_variation = 0.0; cv_variation = 0.0; }
     float GetAPDMeanVariation() const { return apd_variation / this->GetNumLiveNodes(); }
@@ -102,87 +99,146 @@ void CardiacTissue<APM, CVM>::OnInitComplete() {
 
 template <typename APM, typename CVM>
 void CardiacTissue<APM, CVM>::OnStateLoaded() {
-    // LoadAdditionalState restored logical state; only reconnect pointers here.
-    // propagation_solver->BindEvents(*this);
 }
+
 
 template <typename APM, typename CVM>
 void CardiacTissue<APM, CVM>::SaveAdditionalState(std::ofstream& f) const {
-    
-    // Solver identifier makes the solver-specific payload explicit in the checkpoint.
-    constexpr int solver_id = 1; // 1 = legacy heap propagation
-    constexpr int solver_state_version = 1;
-    f.write(reinterpret_cast<const char*>(&solver_id), sizeof(solver_id));
-    f.write(reinterpret_cast<const char*>(&solver_state_version), sizeof(solver_state_version));
 
+    // Estado pertencente ao tecido: estímulos externos agendados.
     const size_t n_stimuli = external_activations.size();
-    f.write(reinterpret_cast<const char*>(&n_stimuli), sizeof(n_stimuli));
-    
-    for(const auto& stimulus : external_activations) {
 
-        f.write(reinterpret_cast<const char*>(&stimulus.time), sizeof(stimulus.time));
-        f.write(reinterpret_cast<const char*>(&stimulus.beat), sizeof(stimulus.beat));
-        
+    f.write(
+        reinterpret_cast<const char*>(&n_stimuli),
+        sizeof(n_stimuli)
+    );
+
+    for (const auto& stimulus : external_activations) {
+        f.write(
+            reinterpret_cast<const char*>(&stimulus.time),
+            sizeof(stimulus.time)
+        );
+
+        f.write(
+            reinterpret_cast<const char*>(&stimulus.beat),
+            sizeof(stimulus.beat)
+        );
+
         const size_t n_nodes = stimulus.nodes.size();
-        f.write(reinterpret_cast<const char*>(&n_nodes), sizeof(n_nodes));
-        
-        for(size_t node_index : stimulus.nodes)
-            f.write(reinterpret_cast<const char*>(&node_index), sizeof(node_index));
+
+        f.write(
+            reinterpret_cast<const char*>(&n_nodes),
+            sizeof(n_nodes)
+        );
+
+        for (size_t node_index : stimulus.nodes) {
+            f.write(
+                reinterpret_cast<const char*>(&node_index),
+                sizeof(node_index)
+            );
+        }
     }
 
+    if (!f) {
+        throw std::runtime_error(
+            "CardiacTissue::SaveAdditionalState: failed to save tissue state."
+        );
+    }
+
+    // O solver concreto persiste seu próprio estado.
     propagation_solver->SaveState(f, *this);
+
+    if (!f) {
+        throw std::runtime_error(
+            "CardiacTissue::SaveAdditionalState: failed to save solver state."
+        );
+    }
 }
+
 
 template <typename APM, typename CVM>
 void CardiacTissue<APM, CVM>::LoadAdditionalState(std::ifstream& f) {
-    
-    int solver_id = 0;
-    f.read(reinterpret_cast<char*>(&solver_id), sizeof(solver_id));
-    
-    constexpr int legacy_heap_solver_id = 1;
-    if(!f || solver_id != legacy_heap_solver_id)
-        throw std::runtime_error("CardiacTissue::LoadState: unsupported or invalid propagation solver identifier.");
-    
-    int solver_state_version = 0;
-    f.read(reinterpret_cast<char*>(&solver_state_version), sizeof(solver_state_version));
-    if(!f || solver_state_version != 1)
-        throw std::runtime_error("CardiacTissue::LoadState: unsupported legacy solver-state version.");
 
     size_t n_stimuli = 0;
-    f.read(reinterpret_cast<char*>(&n_stimuli), sizeof(n_stimuli));
-    if(!f || n_stimuli > 100000000)
-        throw std::runtime_error("CardiacTissue::LoadState: invalid external-stimulus count.");
-    
+
+    f.read(
+        reinterpret_cast<char*>(&n_stimuli),
+        sizeof(n_stimuli)
+    );
+
+    if (!f || n_stimuli > 100000000) {
+        throw std::runtime_error(
+            "CardiacTissue::LoadAdditionalState: invalid external-stimulus count."
+        );
+    }
+
     external_activations.clear();
     external_activations.reserve(n_stimuli);
-    
-    const size_t grid_node_count = static_cast<size_t>(this->tissue_geometry.size_x) * static_cast<size_t>(this->tissue_geometry.size_y) * static_cast<size_t>(this->tissue_geometry.size_z);
-    
-    for(size_t i = 0; i < n_stimuli; ++i) {
 
+    const size_t grid_node_count =
+        static_cast<size_t>(this->tissue_geometry.size_x) *
+        static_cast<size_t>(this->tissue_geometry.size_y) *
+        static_cast<size_t>(this->tissue_geometry.size_z);
+
+    for (size_t i = 0; i < n_stimuli; ++i) {
         Stimuli stimulus{};
         size_t n_nodes = 0;
 
-        f.read(reinterpret_cast<char*>(&stimulus.time), sizeof(stimulus.time));
-        f.read(reinterpret_cast<char*>(&stimulus.beat), sizeof(stimulus.beat));
-        f.read(reinterpret_cast<char*>(&n_nodes), sizeof(n_nodes));
+        f.read(
+            reinterpret_cast<char*>(&stimulus.time),
+            sizeof(stimulus.time)
+        );
 
-        if(!f || n_nodes > grid_node_count)
-            throw std::runtime_error("CardiacTissue::LoadState: invalid external-stimulus node count.");
-        
-        stimulus.nodes.resize(n_nodes);
-        
-        for(auto& node_index : stimulus.nodes) {
-            f.read(reinterpret_cast<char*>(&node_index), sizeof(node_index));
-            if(!f || node_index >= grid_node_count)
-                throw std::runtime_error("CardiacTissue::LoadState: invalid external-stimulus node index.");
+        f.read(
+            reinterpret_cast<char*>(&stimulus.beat),
+            sizeof(stimulus.beat)
+        );
+
+        f.read(
+            reinterpret_cast<char*>(&n_nodes),
+            sizeof(n_nodes)
+        );
+
+        if (!f || n_nodes > grid_node_count) {
+            throw std::runtime_error(
+                "CardiacTissue::LoadAdditionalState: invalid stimulus node count."
+            );
         }
-        
+
+        stimulus.nodes.resize(n_nodes);
+
+        for (auto& node_index : stimulus.nodes) {
+            f.read(
+                reinterpret_cast<char*>(&node_index),
+                sizeof(node_index)
+            );
+
+            if (!f || node_index >= grid_node_count) {
+                throw std::runtime_error(
+                    "CardiacTissue::LoadAdditionalState: invalid stimulus node index."
+                );
+            }
+        }
+
         external_activations.push_back(std::move(stimulus));
     }
-    
+
+    if (!f) {
+        throw std::runtime_error(
+            "CardiacTissue::LoadAdditionalState: truncated tissue state."
+        );
+    }
+
+    // A implementação concreta restaura seu próprio estado.
     propagation_solver->LoadState(f, *this);
+
+    if (!f) {
+        throw std::runtime_error(
+            "CardiacTissue::LoadAdditionalState: failed to load solver state."
+        );
+    }
 }
+
 
 template <typename APM, typename CVM>
 void CardiacTissue<APM,CVM>::ScheduleActivation(const vector<size_t> & nodes, float activation_time, int beat) {

@@ -7,13 +7,6 @@ void LegacyHeapPropagation<APM, CVM>::Initialize(Tissue& tissue) {
     event_queue.Init(tissue.tissue_nodes, tissue.GetNumLiveNodes());
 
     propagation_states.assign(tissue.tissue_nodes.size(), PropagationState{});
-    
-    // for(auto& state : propagation_states) {
-    //     state.next_activation_time = MAX_TIME;
-    //     state.activation_parent = nullptr;
-    //     state.activation_beat = -1;
-    //     state.external_activation = false;
-    // }
 
     BindEvents(tissue);
 }
@@ -88,6 +81,26 @@ void LegacyHeapPropagation<APM, CVM>::Stimulate(Tissue& tissue, std::size_t node
 template <typename APM, typename CVM>
 void LegacyHeapPropagation<APM, CVM>::SaveState(std::ofstream& f, const Tissue& tissue) const {
     
+    constexpr int solver_id =
+        static_cast<int>(PropagationSolverType::LegacyHeap);
+    constexpr int state_version = 1;
+
+    f.write(
+        reinterpret_cast<const char*>(&solver_id),
+        sizeof(solver_id)
+    );
+
+    f.write(
+        reinterpret_cast<const char*>(&state_version),
+        sizeof(state_version)
+    );
+
+    if (!f) {
+        throw std::runtime_error(
+            "LegacyHeapPropagation::SaveState: failed to write header."
+        );
+    }
+
     event_queue.SaveState(f, tissue.tissue_nodes);
 
     const size_t n_states = propagation_states.size();
@@ -121,6 +134,34 @@ void LegacyHeapPropagation<APM, CVM>::SaveState(std::ofstream& f, const Tissue& 
 
 template <typename APM, typename CVM>
 void LegacyHeapPropagation<APM, CVM>::LoadState(std::ifstream& f, Tissue& tissue) {
+    
+    int solver_id = -1;
+    int state_version = -1;
+
+    f.read(
+        reinterpret_cast<char*>(&solver_id),
+        sizeof(solver_id)
+    );
+
+    f.read(
+        reinterpret_cast<char*>(&state_version),
+        sizeof(state_version)
+    );
+
+    const int expected_id =
+        static_cast<int>(PropagationSolverType::LegacyHeap);
+
+    if (!f || solver_id != expected_id) {
+        throw std::runtime_error(
+            "LegacyHeapPropagation::LoadState: solver type mismatch."
+        );
+    }
+
+    if (state_version != 1) {
+        throw std::runtime_error(
+            "LegacyHeapPropagation::LoadState: unsupported state version."
+        );
+    }
     
     event_queue.LoadState(f, tissue.tissue_nodes);
 

@@ -54,6 +54,10 @@ class LegacyHeapPropagation : public FrontPropagationSolver<CardiacTissue<APM, C
 
         LegacyHeapPropagation() = default;
 
+        PropagationSolverType Type() const override {
+            return PropagationSolverType::LegacyHeap;
+        }
+
         void Initialize(Tissue& tissue) override;
         // void Reset(Tissue& tissue) override;
 

@@ -209,10 +209,6 @@ def schedule_activation(cfg, grid, tissue):
                         entries.append((node_id, time, beat_num))
                 add_activate_nodes_entries(activations, entries)
 
-    # Insert all activation times as system events
-    # for activation_time in activations:
-    #     tissue.SetSystemEvent(arritmic3d.SystemEventType.EXT_ACTIVATION, activation_time)
-
     # Schedule activations directly in C++.
     for activation_time, (nodes, beat) in sorted(activations.items()):
         tissue.ScheduleActivation(nodes, float(activation_time), int(beat))

@@ -16,6 +16,9 @@ public:
 
     virtual ~FrontPropagationSolver() = default;
 
+    // Identifica a implementação concreta.
+    virtual PropagationSolverType Type() const = 0;
+
     // Inicializa ou reinicializa o estado da propagação.
     virtual void Initialize(Tissue& tissue) = 0;
     // virtual void Reset(Tissue& tissue) = 0;

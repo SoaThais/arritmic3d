@@ -17,7 +17,6 @@
 
 #include "geometry.h"
 #include "node.h"
-// #include "cell_event_queue.h"
 #include "error.h"
 #include "sensor_dict.h"
 #include "system_event_scheduler.h"
@@ -346,19 +345,6 @@ void BasicTissue<APM,CVM>::Init(const vector<CellType> & cell_types_, vector<Nod
     // Node parameters
     ChangeParameters(parameters_);
 
-    // // Initialize the event queue
-    // event_queue.Init(tissue_nodes, n_live_nodes);
-
-    // // Link each node with its events.
-    // for(size_t i = 0; i < tissue_nodes.size(); i++)
-    // {
-    //     tissue_nodes[i].next_activation_event = event_queue.GetEvent(i,CellEventType::ACTIVATION);
-    //     tissue_nodes[i].next_deactivation_event = event_queue.GetEvent(i,CellEventType::DEACTIVATION);
-
-    //     // Init should only be called after the Node parameters are set.
-    //     tissue_nodes[i].Init(tissue_time, initial_apd);
-    // }
-
     // Initialize nodes.
     for(size_t i = 0; i < tissue_nodes.size(); i++) {
         // Init should only be called after the Node parameters are set.
@@ -440,6 +426,7 @@ void BasicTissue<APM,CVM>::Reset()
     timer.fill(0.0f);
 }
 */
+
 /**
  * Initialize the tissue from Python. Calls Init with a vector of parameters.
  * @param cell_types_ Vector of cell types.
@@ -971,8 +958,7 @@ void BasicTissue<APM,CVM>::LoadState(const std::string & filename)
     // Load parameters pool
     parameters_pool.LoadState(state_file);
     LOG::Info(debug_level > 0, parameters_pool.Info());
-    // Load event queue
-    // event_queue.LoadState(state_file, tissue_nodes);
+
     // Load system event scheduler
     system_event_scheduler.LoadState(state_file);
 
@@ -986,8 +972,6 @@ void BasicTissue<APM,CVM>::LoadState(const std::string & filename)
 
     // Restore the node index.
     ReconstructIndex();
-
-    // OnInitComplete();
 
     LoadAdditionalState(state_file);
 

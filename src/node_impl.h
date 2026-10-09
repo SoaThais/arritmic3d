@@ -21,9 +21,6 @@ using std::endl;
 template <typename APD, typename CVM>
 NodeT<APD, CVM>::NodeT() :
     parameters(nullptr)
-    // next_activation_event(nullptr),
-    // next_deactivation_event(nullptr),
-    // activation_parent(nullptr) 
 { }
 
 /**
@@ -45,16 +42,6 @@ typename NodeT<APD, CVM>::CellActivationState NodeT<APD, CVM>::GetState(float te
 
     return CellActivationState::INACTIVE;
 
-    // CellActivationState state = CellActivationState::INACTIVE;
-    // if(this->type != CELL_TYPE_VOID && this->apd_model.IsActive(test_time_))
-    //     state = CellActivationState::ACTIVE;
-    // else if( this->type != CELL_TYPE_VOID &&
-    //         this->next_activation_time > test_time_ &&
-    //         this->next_activation_time < MAX_TIME )
-    //     state = CellActivationState::WAITING_FOR_ACTIVATION;
-    // else
-    //     state = CellActivationState::INACTIVE;
-    // return state;
 }
 
 /**
@@ -70,18 +57,10 @@ void NodeT<APD, CVM>::Init(float current_time_, float initial_apd_)
     this->apd_model.Init(this->parameters, this->type, initial_apd_, current_time_, 0.0);
     this->cv_model.InitWithAPD(this->parameters, this->type, this->apd_model.getLastDI(), this->apd_model.getAPD() );
     this->local_activation_time = this->apd_model.getActivationTime();
-    // this->next_activation_time = MAX_TIME;
-    // this->next_deactivation_time = MAX_TIME;
     this->received_potential = 0.0;
-    // this->next_activation_event->Reset();
-    // this->next_deactivation_event->Reset();
     this->recovery_time = MAX_TIME;
 
-    // this->external_activation = false;
-
     this->conduction_vel = cv_model.getConductionVelocity();
-
-    // this->activation_parent = nullptr;
 }
 
 
@@ -156,43 +135,18 @@ bool NodeT<APD, CVM>::ComputeActivation(float current_time_,  CardiacTissue<APD,
  * From Node.pde: activar
 */
 template <typename APD, typename CVM>
-// bool NodeT<APD, CVM>::Activate(float current_time_, CardiacTissue<APD, CVM> * tissue_)
 bool NodeT<APD, CVM>::Activate(float current_time_, int source_beat_, CardiacTissue<APD, CVM> * tissue_)
 {
     bool activated = false;
 
-    // if (this->GetId() == 39246) {
-    //     std::cout
-    //         << "\n[DEBUG ACTIVATE 39246]"
-    //         << "\n  current_time=" << current_time_
-    //         << "\n  source_beat=" << source_beat_
-    //         << "\n  old_node_beat=" << beat
-    //         << "\n  old_LAT=" << local_activation_time
-    //         << "\n";
-    // }
-
-    // if (this->GetState(current_time_) <= CellActivationState::WAITING_FOR_ACTIVATION) {
     if (this->GetState(current_time_) == CellActivationState::INACTIVE) {
         if(!this->ComputeActivation(current_time_, tissue_))
             activated = false;
         else {
             this->local_activation_time = current_time_;
 
-            // this->next_deactivation_time = current_time_ + this->apd_model.getAPD();
-            //this->life_time = this->action_potential_duration; ///< @todo Check life time.
-
             this->recovery_time = current_time_ + this->apd_model.getAPD();
             this->beat          = source_beat_;
-
-            // if (this->GetId() == 39246) {
-            //     std::cout
-            //         << "  NEW node_beat=" << beat
-            //         << "\n";
-            // }
-
-
-            // if (this->activation_parent != nullptr)
-            //     this->beat = this->activation_parent->beat;
 
             activated = true;
         }
@@ -202,72 +156,6 @@ bool NodeT<APD, CVM>::Activate(float current_time_, int source_beat_, CardiacTis
     // this->next_activation_time = MAX_TIME;
     return activated;
 }
-
-
-// /**
-//  * @brief Prepare the node for activation at a given time.
-//  *
-//  * @param parent_ Node that activates this one.
-//  * @param current_time_ Current time of the simulation.
-//  * @param activation_time_ Time of activation.
-// */
-// template <typename APD, typename CVM>
-// typename NodeT<APD, CVM>::CellEvent* NodeT<APD, CVM>::ScheduleActivation(NodeT<APD, CVM>* parent_, float activation_time_)
-// {
-//     CellEvent *ev = nullptr;
-//     if( parent_->parameters->safety_factor < this->parameters->safety_factor)  // @todo Why? Also managed in Tissue
-//         return ev;
-
-//     // Only if activation is earlier we modify anything
-//     if (activation_time_ < this->next_activation_time)
-//     {
-//         // We update activation time
-//         this->next_activation_time = activation_time_;
-//         this->activation_parent = parent_;
-//         this->beat = parent_->beat;
-
-//         this->next_activation_event->ChangeEvent(this->next_activation_time);
-//         ev = this->next_activation_event;
-
-//     }
-
-//     return ev;
-// }
-
-// /**
-//  * @brief Prepare the node for external activation at a given time.
-//  *
-//  * @todo Integrate, if possible, with ScheduleActivation
-//  *
-//  * @param activation_time_ Time of activation.
-//  * @param beat_n_ Beat number of the activation.
-// */
-// template <typename APD, typename CVM>
-// typename NodeT<APD, CVM>::CellEvent* NodeT<APD, CVM>::ScheduleExternalActivation(float activation_time_, int beat_n_)
-// {
-//     CellEvent *ev = nullptr;
-
-//     // Only if cell is inactive
-//     if (this->GetState(activation_time_) <= CellActivationState::WAITING_FOR_ACTIVATION)
-//         // Only if activation is earlier we modify anything
-//         if (activation_time_ < this->next_activation_time)
-//         {
-//             this->next_activation_time = activation_time_;
-
-//             this->next_activation_event->ChangeEvent(this->next_activation_time);
-//             ev = this->next_activation_event;
-
-//             this->external_activation = true;
-//             this->activation_parent = nullptr;
-//             this->beat = beat_n_;
-//             // It is an external activation, so we set the potential by hand.
-//             this->received_potential = 1.0;
-//         }
-
-//     return ev;
-// }
-
-
 
 template <typename APD, typename CVM>
 float NodeT<APD, CVM>::ComputeDirectionalConductionVelocity(const NodeT::Vector3 &direction_)
@@ -307,7 +195,6 @@ float NodeT<APD, CVM>::ComputeDirectionalConductionVelocity(const NodeT::Vector3
 }
 
 template <typename APD, typename CVM>
-// void NodeT<APD, CVM>::SaveState(std::ofstream & f, const class ParametersPool & parameters_pool, const CellEventQueue<NodeT> & event_queue) const
 void NodeT<APD, CVM>::SaveState(std::ofstream & f, const class ParametersPool & parameters_pool) const {
     
     f.write((char *)&SAVE_VERSION, sizeof(int));
@@ -327,8 +214,6 @@ void NodeT<APD, CVM>::SaveState(std::ofstream & f, const class ParametersPool & 
     f.write((char *)&ext_grid_pos, sizeof(ext_grid_pos));
     // Save type
     f.write((char *)&type, sizeof(CellType));
-    // // Save external activation flag
-    // f.write((char *)&external_activation, sizeof(external_activation));
 
     // Save activation data
     f.write((char *)&blocked, sizeof(blocked));
@@ -341,37 +226,14 @@ void NodeT<APD, CVM>::SaveState(std::ofstream & f, const class ParametersPool & 
     f.write((char *)&received_potential, sizeof(received_potential));
     f.write((char *)&recovery_time, sizeof(recovery_time));
 
-    // f.write((char *)&next_activation_time, sizeof(next_activation_time));
-    // f.write((char *)&next_deactivation_time, sizeof(next_deactivation_time));
-
     // Save APD model state
     apd_model.SaveState(f);
 
     // Save CV model state
     cv_model.SaveState(f);
-
-    // // Save events. It is possible to know the index directly from node position, but this way is safer and prepared for possible changes.
-    // // Save next activation event state
-    // size_t next_act_index = std::numeric_limits<size_t>::max();
-    // if(next_activation_event != nullptr)
-    //     next_act_index = event_queue.GetIndex(next_activation_event);
-    // f.write( (char *) &next_act_index, sizeof(next_act_index) );
-
-    // // Save next deactivation event state
-    // size_t next_deact_index = std::numeric_limits<size_t>::max();
-    // if(next_deactivation_event != nullptr)
-    //     next_deact_index = event_queue.GetIndex(next_deactivation_event);
-    // f.write( (char *) &next_deact_index, sizeof(next_deact_index) );
-
-    // // Save activation parent
-    // size_t act_parent_index = std::numeric_limits<size_t>::max();
-    // if(activation_parent != nullptr)
-    //     act_parent_index = activation_parent->id;
-    // f.write( (char *) &act_parent_index, sizeof(act_parent_index) );
 }
 
 template <typename APD, typename CVM>
-// void NodeT<APD, CVM>::LoadState(std::ifstream & f, ParametersPool & parameters_pool, CellEventQueue<NodeT> & event_queue, BasicTissue<APD, CVM> & tissue) {
 void NodeT<APD, CVM>::LoadState(std::ifstream & f, ParametersPool & parameters_pool) {
     
     int version;
@@ -395,8 +257,6 @@ void NodeT<APD, CVM>::LoadState(std::ifstream & f, ParametersPool & parameters_p
     f.read((char *) &ext_grid_pos, sizeof(ext_grid_pos));
     // Load type
     f.read((char *) &type, sizeof(CellType));
-    // // Load external activation flag
-    // f.read((char *) &external_activation, sizeof(external_activation));
 
     // Load activation data
     f.read((char *) &blocked, sizeof(blocked));
@@ -408,38 +268,12 @@ void NodeT<APD, CVM>::LoadState(std::ifstream & f, ParametersPool & parameters_p
     f.read((char *) &kapd_v, sizeof(kapd_v));
     f.read((char *) &received_potential, sizeof(received_potential));
     f.read((char *) &recovery_time, sizeof(recovery_time));
-    // f.read((char *) &next_activation_time, sizeof(next_activation_time));
-    // f.read((char *) &next_deactivation_time, sizeof(next_deactivation_time));
 
     // Load APD model state
     apd_model.LoadState(f, type, parameters);
 
     // Load CV model state
     cv_model.LoadState(f, type, parameters);
-
-    // // Load next activation event state
-    // size_t next_act_index;
-    // f.read( (char *) &next_act_index, sizeof(next_act_index));
-    // if(next_act_index != std::numeric_limits<size_t>::max())
-    //     next_activation_event = event_queue.GetEventPtr(next_act_index);
-    // else
-    //     next_activation_event = nullptr;
-
-    // // Load next deactivation event state
-    // size_t next_deact_index;
-    // f.read( (char *) &next_deact_index, sizeof(next_deact_index) );
-    // if(next_deact_index != std::numeric_limits<size_t>::max())
-    //     next_deactivation_event = event_queue.GetEventPtr(next_deact_index);
-    // else
-    //     next_deactivation_event = nullptr;
-
-    // // Load activation parent
-    // size_t act_parent_index;
-    // f.read( (char *) &act_parent_index, sizeof(act_parent_index) );
-    // if(act_parent_index != std::numeric_limits<size_t>::max())
-    //     activation_parent = tissue.GetNodePtr(act_parent_index);
-    // else
-    //     activation_parent = nullptr;
 }
 
 
