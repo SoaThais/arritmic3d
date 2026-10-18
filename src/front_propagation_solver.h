@@ -24,13 +24,22 @@ public:
     // virtual void Reset(Tissue& tissue) = 0;
 
     // Consulta a fila ou estrutura interna do solver.
-    virtual float NextEventTime() const = 0;
+    // virtual float NextEventTime() const = 0;
     virtual bool HasPendingWork() const = 0;
 
-    virtual std::size_t NextEventNodeIndex(const Tissue& tissue) const = 0;
+    // virtual std::size_t NextEventNodeIndex(const Tissue& tissue) const = 0;
 
     // Processa o próximo evento de propagação.
-    virtual std::size_t AdvanceNext(Tissue& tissue) = 0;
+    // virtual std::size_t AdvanceNext(Tissue& tissue) = 0;
+
+    // Avança a propagação interna até o limite de tempo.
+    //
+    // inclusive = false: processa instantes < time_limit
+    // inclusive = true:  processa instantes <= time_limit
+    //
+    // Nenhuma ativação ou recuperação fisiológica posterior
+    // ao limite solicitado pode ser efetivada.
+    virtual void AdvanceUntil(Tissue& tissue, float time_limit, bool inclusive) = 0;
 
     // Agenda a ativação de um nó por um estímulo externo.
     virtual void Stimulate(Tissue& tissue, std::size_t node_index, float activation_time, int beat ) = 0;

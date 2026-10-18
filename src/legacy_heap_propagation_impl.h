@@ -452,4 +452,43 @@ void LegacyHeapPropagation<APM, CVM>::ProcessEvent(Tissue& tissue, CellEvent* ev
     }
 }
 
+template <typename APM, typename CVM>
+void LegacyHeapPropagation<APM,CVM>::AdvanceUntil(Tissue& tissue, float time_limit, bool inclusive) {
+    
+    if (time_limit < tissue.GetTime())
+        throw std::runtime_error(
+            "Cannot advance propagation backwards.");
+
+    while (HasPendingWork()) {
+
+        float next_time = NextEventTime();
+
+        // Para no limite temporal solicitado.
+        if (next_time > time_limit)
+            break;
+
+        if (!inclusive && next_time == time_limit)
+            break;
+
+        if (next_time < tissue.GetTime())
+            throw std::runtime_error("Propagation event is in the past.");
+
+        // Necessário para manter a compatibilidade
+        // com o registro dos sensores no solver legado.
+        std::size_t node_index = NextEventNodeIndex(tissue);
+
+        // Implementação existente, sem alterações.
+        AdvanceNext(tissue);
+
+        // Preserva o registro dos sensores após cada
+        // evento de nó processado.
+        auto& node = tissue.tissue_nodes.at(node_index);
+
+        if (node.parameters &&
+            node.parameters->sensor) {
+            tissue.sensor_dict.AddData(node.id, node.GetData(tissue.GetTime()));
+        }
+    }
+}
+
 #endif

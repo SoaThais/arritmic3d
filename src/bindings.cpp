@@ -92,9 +92,9 @@ PYBIND11_MODULE(MODULE_NAME, m) {
                py::arg("filename"), py::arg("data_id"), py::arg("binary") = false,
                "Save the state of the tissue in a VTK file for visualization. The data_id parameter is a bitwise OR of NodeDataId values to select which data to save. If binary is true, the data will be saved in binary format.")
           .def("GetTime", &CardiacTissue<T_AP, T_CV>::GetTime)
-          .def("update", &CardiacTissue<T_AP, T_CV>::update,
-               py::arg("debug") = 0,
-               "Update the tissue state by processing the next event in the queue. Returns the type of event that was processed.")
+          // .def("update", &CardiacTissue<T_AP, T_CV>::update,
+          //      py::arg("debug") = 0,
+          //      "Update the tissue state by processing the next event in the queue. Returns the type of event that was processed.")
           .def("SetTimer", &CardiacTissue<T_AP, T_CV>::SetTimer,
                py::arg("type"), py::arg("period"), py::arg("initial_time") = 0.0f,
                "Set a timer for a system event. There can be one timer for each type of system event.")

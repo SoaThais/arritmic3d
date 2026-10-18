@@ -260,137 +260,292 @@ void CardiacTissue<APM, CVM>::ExecuteScheduledActivation(float activation_time) 
 
 }
 
-template <typename APM, typename CVM>
-void CardiacTissue<APM,CVM>::Run(float end_time, std::function<void(float)> output_callback, int debug) {
+// template <typename APM, typename CVM>
+// void CardiacTissue<APM,CVM>::Run(float end_time, std::function<void(float)> output_callback, int debug) {
 
-    while (this->tissue_time < end_time) {
+//     while (this->tissue_time < end_time) {
 
-        SystemEventType event_type = this->update(debug);
+//         SystemEventType event_type = this->update(debug);
 
-        if(event_type == SystemEventType::NO_EVENT)
-            break;
+//         if(event_type == SystemEventType::NO_EVENT)
+//             break;
 
-        switch (event_type) {
-            case SystemEventType::EXT_ACTIVATION:
-                this->ExecuteScheduledActivation(this->tissue_time);
-                break;
-            case SystemEventType::FILE_WRITE:
-                if (output_callback) 
-                    output_callback(this->tissue_time);
-                break;
-            default:
-                break;
-        }
-    }
-}
+//         switch (event_type) {
+//             case SystemEventType::EXT_ACTIVATION:
+//                 this->ExecuteScheduledActivation(this->tissue_time);
+//                 break;
+//             case SystemEventType::FILE_WRITE:
+//                 if (output_callback) 
+//                     output_callback(this->tissue_time);
+//                 break;
+//             default:
+//                 break;
+//         }
+//     }
+// }
 
-/**
- * Update the tissue simulation processing an event.
- * @param debug Debug level
- * @return true if there is an event of the simulation.
-*/
-template <typename APM,typename CVM>
-SystemEventType CardiacTissue<APM,CVM>::update(int debug) {
-
-    const bool cell_empty   = !propagation_solver->HasPendingWork();
-    const bool system_empty = this->system_event_scheduler.IsEmpty();
-
-    if(cell_empty && system_empty)
-        return SystemEventType::NO_EVENT;
-
-    bool process_system = false;
-
-    if(cell_empty) {
-        process_system = true;
-    }
-    else if(system_empty) {
-        process_system = false;
-    }
-    else {
-        const float cell_time = propagation_solver->NextEventTime();
-        const auto &system_ev = this->system_event_scheduler.GetFirst();
-
-        if(system_ev.event_time < cell_time) {
-            process_system = true;
-        }
-        else if(system_ev.event_time > cell_time) {
-            process_system = false;
-        }
-        else {
-            // Same time: system event priority decides.
-            process_system = system_ev.priority == 0;
-        }
-    }
-
-    // ---------------------------------------------------------
-    // SYSTEM EVENT
-    // ---------------------------------------------------------
-
-    if(process_system) {
-
-        const auto &system_ev = this->system_event_scheduler.GetFirst();
-
-        const float ev_time = system_ev.event_time;
-        const SystemEventType ev_type = system_ev.type;
-
-        LOG::Info(debug > 0, "System event at t=", ev_time, " type=", int(ev_type));
-
-        this->tissue_time = ev_time;
-
-        this->system_event_scheduler.ExtractFirst();
-
-        const float inc_time = this->timer.at(int(ev_type));
-
-        if(inc_time > 0) {
-
-            int priority = 1;
-
-            if(ev_type == SystemEventType::EXT_ACTIVATION)
-                priority = 0;
-
-            const float new_ev_time = this->tissue_time + inc_time;
-
-            this->system_event_scheduler.Insert(new_ev_time, ev_type, priority);
-        }
-
-        return ev_type;
-    }
-
-    // ---------------------------------------------------------
-    // CELL EVENT
-    // ---------------------------------------------------------
-
-    const float ev_time = propagation_solver->NextEventTime();
-    const std::size_t node_index = propagation_solver->NextEventNodeIndex(*this);
-
-    Node* node = &this->tissue_nodes.at(node_index);
-
-    LOG::Info(debug > 0, "Cell event at t=", ev_time, " node=", node->id);
-    LOG::Warning(ev_time < this->tissue_time, " t=", this->tissue_time, " older than ev.t=", ev_time);
-    LOG::Info(debug > 1, "Before processing event. Node value: ", *node);
-    LOG::Warning(node->parameters == nullptr, "Node ", node->id, " has no parameters assigned.");
-
-    // AdvanceNext updates tissue_time, removes the event from the
-    // solver queue, and processes the event.
-    const std::size_t processed = propagation_solver->AdvanceNext(*this);
-
-    if (processed == 0)
-        throw std::runtime_error("CardiacTissue::update: solver reported a pending event but did not process it.");
-
-    // Check that the solver did not leave an event in the past.
-    if (propagation_solver->HasPendingWork()) {
-        LOG::Error(propagation_solver->NextEventTime() < this->tissue_time, " We skipped an event!");
-    }
-
-    LOG::Info(debug > 1, "After processing event. Node value: ", *node);
-
-    if (node->parameters != nullptr && node->parameters->sensor) {
-        this->sensor_dict.AddData(node->id, node->GetData(this->tissue_time));
-    }
-
-    return SystemEventType::NODE_EVENT;
+// template <typename APM, typename CVM>
+// void CardiacTissue<APM,CVM>::Run(float end_time, std::function<void(float)> output_callback, int debug) {
     
+//     if (end_time < this->tissue_time)
+//         throw std::runtime_error("Run: end_time is in the past.");
+
+//     auto& scheduler = this->system_event_scheduler;
+
+//     while (this->tissue_time < end_time) {
+
+//         // Não há evento do sistema antes do fim:
+//         // avança a propagação diretamente até end_time.
+//         if (scheduler.IsEmpty() || scheduler.GetFirst().event_time > end_time) {
+//             propagation_solver->AdvanceUntil(*this, end_time, true);
+//             this->tissue_time = end_time;
+//             break;
+//         }
+
+//         // Instante do próximo evento do sistema.
+//         float t = scheduler.GetFirst().event_time;
+
+//         if (t < this->tissue_time)
+//             throw std::runtime_error("System event is in the past.");
+
+//         // Coleta todos os eventos do sistema nesse instante.
+//         std::vector<SystemEvent> events_at_t;
+
+//         while (!scheduler.IsEmpty() && scheduler.GetFirst().event_time == t) {
+//             events_at_t.push_back(scheduler.GetFirst());
+//             scheduler.ExtractFirst();
+//         }
+
+//         // 1. Propaga estritamente antes de t.
+//         propagation_solver->AdvanceUntil(*this, t, false);
+
+//         this->tissue_time = t;
+
+//         // 2. Executa os estímulos externos em t.
+//         bool has_stimulus = false;
+
+//         for (const auto& ev : events_at_t) {
+//             if (ev.type == SystemEventType::EXT_ACTIVATION) {
+//                 has_stimulus = true;
+//             }
+//         }
+
+//         if (has_stimulus) {
+//             ExecuteScheduledActivation(t);
+//         }
+
+//         // 3. Processa a propagação em t.
+//         propagation_solver->AdvanceUntil(*this, t, true);
+
+//         this->tissue_time = t;
+
+//         // 4. Trata as saídas e os demais eventos do sistema.
+//         for (const auto& ev : events_at_t) {
+
+//             if (ev.type == SystemEventType::FILE_WRITE) {
+//                 if (output_callback)
+//                     output_callback(t);
+//             }
+
+//             // Reagenda os eventos periódicos do sistema.
+//             float period = this->timer.at(int(ev.type));
+
+//             if (period > 0.0f) {
+//                 scheduler.Insert( t + period, ev.type, ev.priority);
+//             }
+//         }
+
+//         if (t == end_time)
+//             break;
+//     }
+// }
+
+template <typename APM, typename CVM>
+void CardiacTissue<APM, CVM>::Run(float end_time, std::function<void(float)> output_callback, int debug) {
+    
+    if (end_time < this->tissue_time) {
+        throw std::runtime_error("Run: end_time is in the past.");
+    }
+
+    // Mantém o comportamento do Run antigo:
+    // não processa eventos se já estamos no tempo final.
+    if (this->tissue_time >= end_time)
+        return;
+
+    auto& scheduler = this->system_event_scheduler;
+
+    while (true) {
+
+        // Não há evento do sistema até end_time.
+        if (scheduler.IsEmpty() ||
+            scheduler.GetFirst().event_time > end_time) {
+
+            propagation_solver->AdvanceUntil(*this, end_time, true);
+
+            this->tissue_time = end_time;
+            break;
+        }
+
+        // Considera somente o próximo evento do sistema.
+        const SystemEvent ev = scheduler.GetFirst();
+        const float t = ev.event_time;
+        const SystemEventType event_type = ev.type;
+
+        if (t < this->tissue_time) {
+            throw std::runtime_error("System event is in the past.");
+        }
+
+        LOG::Info( debug > 0, "System event at t=", t, " type=", int(event_type), " priority=", ev.priority);
+
+        // 1. Processa eventos celulares estritamente anteriores a t.
+        propagation_solver->AdvanceUntil(*this, t, false);
+
+        this->tissue_time = t;
+
+        // 2. Se a prioridade do evento do sistema não for 0,
+        // processa também os eventos celulares em t primeiro.
+        //
+        // Isso reproduz a regra antiga:
+        // prioridade 0 do sistema vence o empate;
+        // caso contrário, o evento celular vence.
+        if (ev.priority != 0) {
+            propagation_solver->AdvanceUntil(*this, t, true);
+            this->tissue_time = t;
+        }
+
+        // 3. Remove e processa apenas este evento do sistema.
+        scheduler.ExtractFirst();
+
+        if (event_type == SystemEventType::EXT_ACTIVATION) {
+            ExecuteScheduledActivation(t);
+        }
+        else if (event_type == SystemEventType::FILE_WRITE) {
+            if (output_callback) {
+                output_callback(t);
+            }
+        }
+
+        // 4. Reagenda o evento periódico, preservando a regra antiga.
+        const float period = this->timer.at(int(event_type));
+
+        if (period > 0.0f) {
+            const int priority = (event_type == SystemEventType::EXT_ACTIVATION) ? 0 : 1;
+            scheduler.Insert(t + period, event_type, priority);
+        }
+
+        // Não interrompe aqui quando t == end_time:
+        // ainda pode haver outros eventos no mesmo instante.
+        // A próxima iteração processará os eventos restantes.
+    }
 }
+
+// /**
+//  * Update the tissue simulation processing an event.
+//  * @param debug Debug level
+//  * @return true if there is an event of the simulation.
+// */
+// template <typename APM,typename CVM>
+// SystemEventType CardiacTissue<APM,CVM>::update(int debug) {
+
+//     const bool cell_empty   = !propagation_solver->HasPendingWork();
+//     const bool system_empty = this->system_event_scheduler.IsEmpty();
+
+//     if(cell_empty && system_empty)
+//         return SystemEventType::NO_EVENT;
+
+//     bool process_system = false;
+
+//     if(cell_empty) {
+//         process_system = true;
+//     }
+//     else if(system_empty) {
+//         process_system = false;
+//     }
+//     else {
+//         const float cell_time = propagation_solver->NextEventTime();
+//         const auto &system_ev = this->system_event_scheduler.GetFirst();
+
+//         if(system_ev.event_time < cell_time) {
+//             process_system = true;
+//         }
+//         else if(system_ev.event_time > cell_time) {
+//             process_system = false;
+//         }
+//         else {
+//             // Same time: system event priority decides.
+//             process_system = system_ev.priority == 0;
+//         }
+//     }
+
+//     // ---------------------------------------------------------
+//     // SYSTEM EVENT
+//     // ---------------------------------------------------------
+
+//     if(process_system) {
+
+//         const auto &system_ev = this->system_event_scheduler.GetFirst();
+
+//         const float ev_time = system_ev.event_time;
+//         const SystemEventType ev_type = system_ev.type;
+
+//         LOG::Info(debug > 0, "System event at t=", ev_time, " type=", int(ev_type));
+
+//         this->tissue_time = ev_time;
+
+//         this->system_event_scheduler.ExtractFirst();
+
+//         const float inc_time = this->timer.at(int(ev_type));
+
+//         if(inc_time > 0) {
+
+//             int priority = 1;
+
+//             if(ev_type == SystemEventType::EXT_ACTIVATION)
+//                 priority = 0;
+
+//             const float new_ev_time = this->tissue_time + inc_time;
+
+//             this->system_event_scheduler.Insert(new_ev_time, ev_type, priority);
+//         }
+
+//         return ev_type;
+//     }
+
+//     // ---------------------------------------------------------
+//     // CELL EVENT
+//     // ---------------------------------------------------------
+
+//     const float ev_time = propagation_solver->NextEventTime();
+//     const std::size_t node_index = propagation_solver->NextEventNodeIndex(*this);
+
+//     Node* node = &this->tissue_nodes.at(node_index);
+
+//     LOG::Info(debug > 0, "Cell event at t=", ev_time, " node=", node->id);
+//     LOG::Warning(ev_time < this->tissue_time, " t=", this->tissue_time, " older than ev.t=", ev_time);
+//     LOG::Info(debug > 1, "Before processing event. Node value: ", *node);
+//     LOG::Warning(node->parameters == nullptr, "Node ", node->id, " has no parameters assigned.");
+
+//     // AdvanceNext updates tissue_time, removes the event from the
+//     // solver queue, and processes the event.
+//     const std::size_t processed = propagation_solver->AdvanceNext(*this);
+
+//     if (processed == 0)
+//         throw std::runtime_error("CardiacTissue::update: solver reported a pending event but did not process it.");
+
+//     // Check that the solver did not leave an event in the past.
+//     if (propagation_solver->HasPendingWork()) {
+//         LOG::Error(propagation_solver->NextEventTime() < this->tissue_time, " We skipped an event!");
+//     }
+
+//     LOG::Info(debug > 1, "After processing event. Node value: ", *node);
+
+//     if (node->parameters != nullptr && node->parameters->sensor) {
+//         this->sensor_dict.AddData(node->id, node->GetData(this->tissue_time));
+//     }
+
+//     return SystemEventType::NODE_EVENT;
+    
+// }
 
 /**
  * External activation of a set of nodes.
