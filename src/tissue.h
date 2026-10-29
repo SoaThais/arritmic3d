@@ -22,6 +22,7 @@
 #include "basic_tissue.h"
 #include "system_event_scheduler.h"
 #include "legacy_heap_propagation.h"
+#include "fim_propagation.h"
 #include "front_propagation_solver.h"
 
 using std::vector;
@@ -56,7 +57,8 @@ public:
                 propagation_solver = std::make_unique<LegacyHeapPropagation<APM, CVM>>();
                 break;
             case PropagationSolverType::FIM:
-                throw std::runtime_error("CardiacTissue: FIM solver ainda nao implementado.");
+                propagation_solver = std::make_unique<FIMPropagation<APM, CVM>>();
+        break;
         }
     }
     
@@ -75,6 +77,7 @@ public:
 private:
 
     friend class LegacyHeapPropagation<APM,CVM>;
+    friend class FIMPropagation<APM, CVM>;
 
     std::vector<Stimuli> external_activations;
     void ExecuteScheduledActivation(float activation_time);

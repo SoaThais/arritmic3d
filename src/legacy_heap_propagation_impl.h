@@ -3,11 +3,8 @@
 
 template <typename APM, typename CVM>
 void LegacyHeapPropagation<APM, CVM>::Initialize(Tissue& tissue) {
-    
     event_queue.Init(tissue.tissue_nodes, tissue.GetNumLiveNodes());
-
     propagation_states.assign(tissue.tissue_nodes.size(), PropagationState{});
-
     BindEvents(tissue);
 }
 
@@ -290,16 +287,12 @@ LegacyHeapPropagation<APM, CVM>::PropagateActivation(Tissue& tissue, Node* node,
 
         float direct_activation_time = node->local_activation_time + distance / direct_vel;
 
-        // if (neigh->GetId() == 1150) {
-        //     std::cout
-        //         << "\n[DEBUG PROPAGATION TO 1150]"
-        //         << "\n  parent=" << node->GetId()
-        //         << "\n  parent_LAT=" << node->local_activation_time
-        //         << "\n  distance=" << distance
-        //         << "\n  direct_vel=" << direct_vel
-        //         << "\n  activation_time=" << direct_activation_time
-        //         << "\n";
+        // // --- DEBUG LEGACY ---
+        // if (neigh->id == 125132) {
+        //     printf("[LEGACY] Alvo: 125132 | Fonte: %d | T_fonte: %.8f | Dist: %.8f | Vel: %.8f | TA_calc: %.8f\n",
+        //            node->id, node->local_activation_time, distance, direct_vel, direct_activation_time);
         // }
+        // // --------------------
 
         if (neigh->GetState(current_time) == Node::CellActivationState::ACTIVE) {
 
@@ -330,18 +323,6 @@ void LegacyHeapPropagation<APM, CVM>::ProcessEvent(Tissue& tissue, CellEvent* ev
     Node* node_ = ev->cell_node;
     auto& state = GetState(tissue, node_);
 
-    // if (node_->GetId() == 39246) {
-    //     std::cout
-    //         << "\n[DEBUG PROCESS 39246]"
-    //         << "\n  tissue_time=" << tissue.tissue_time
-    //         << "\n  event_time=" << ev->event_time
-    //         << "\n  node_beat=" << node_->beat
-    //         << "\n  activation_beat=" << state.activation_beat
-    //         << "\n  next_activation_time=" << state.next_activation_time
-    //         << "\n  LAT=" << node_->local_activation_time
-    //         << "\n";
-    // }
-
     LOG::Warning(ev->event_time != tissue.tissue_time, "TriggerEvent(): In node ", node_->id, "Event time mismatch. Event time is ", ev->event_time, " while current time is ", tissue.tissue_time);
 
     if (tissue.tissue_time == state.next_activation_time) {
@@ -354,15 +335,6 @@ void LegacyHeapPropagation<APM, CVM>::ProcessEvent(Tissue& tissue, CellEvent* ev
             state.next_activation_time = MAX_TIME;
         }
         else {
-
-            // if(node_->GetId() >= 1150 && node_->GetId() <= 1399) {
-            //     std::cout
-            //         << "[DEBUG ACTIVATE TARGET]"
-            //         << " node=" << node_->GetId()
-            //         << " time=" << tissue.tissue_time
-            //         << " beat=" << state.activation_beat
-            //         << std::endl;
-            // }
 
             if (node_->Activate(tissue.tissue_time, state.activation_beat, &tissue)) {
 
@@ -456,8 +428,7 @@ template <typename APM, typename CVM>
 void LegacyHeapPropagation<APM,CVM>::AdvanceUntil(Tissue& tissue, float time_limit, bool inclusive) {
     
     if (time_limit < tissue.GetTime())
-        throw std::runtime_error(
-            "Cannot advance propagation backwards.");
+        throw std::runtime_error("Cannot advance propagation backwards.");
 
     while (HasPendingWork()) {
 
@@ -484,8 +455,7 @@ void LegacyHeapPropagation<APM,CVM>::AdvanceUntil(Tissue& tissue, float time_lim
         // evento de nó processado.
         auto& node = tissue.tissue_nodes.at(node_index);
 
-        if (node.parameters &&
-            node.parameters->sensor) {
+        if (node.parameters && node.parameters->sensor) {
             tissue.sensor_dict.AddData(node.id, node.GetData(tissue.GetTime()));
         }
     }
