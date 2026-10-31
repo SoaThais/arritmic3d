@@ -130,7 +130,6 @@ class FIMPropagation : public FrontPropagationSolver<CardiacTissue<APM, CVM>> {
         vector<std::size_t>      recovery_queue_;   ///< Nós com recuperação pendente (idem).
 
         // ---- suporte ----
-        void ValidateSupport(const Tissue& tissue) const;
         void RebuildQueues(Tissue& tissue);
         std::size_t NodeIndex(const Tissue& tissue, const Node* node) const;
 

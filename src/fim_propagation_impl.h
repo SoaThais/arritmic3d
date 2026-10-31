@@ -15,16 +15,6 @@ void FIMPropagation<APM, CVM>::Initialize (Tissue& tissue) {
     list_.clear();
     converged_.clear();
     recovery_queue_.clear();
-    ValidateSupport(tissue);
-}
-
-template <typename APM, typename CVM>
-void FIMPropagation<APM, CVM>::ValidateSupport (const Tissue& tissue) const {
-    for (const auto& node : tissue.tissue_nodes) {
-        if (node.parameters != nullptr && node.parameters->min_potential > 0.0f) {
-            throw std::runtime_error("FIMPropagation: min_potential > 0 ainda nao e suportado pelo solver FIM.");
-        }
-    }
 }
 
 template <typename APM, typename CVM>
@@ -774,9 +764,6 @@ void FIMPropagation<APM, CVM>::AdvanceUntil(Tissue& tissue, float time_limit, bo
     if (time_limit < tissue.GetTime())
         throw std::runtime_error("Cannot advance propagation backwards.");
 
-    if (tissue.long_apd_reactivation)
-        throw std::runtime_error("FIMPropagation::AdvanceUntil: long_apd_reactivation ainda nao e suportado pelo solver FIM.");
-
     auto within_limit = [&](float t) {
         return inclusive ? (t <= time_limit) : (t < time_limit);
     };
@@ -898,7 +885,6 @@ void FIMPropagation<APM, CVM>::LoadState(std::ifstream& f, Tissue& tissue) {
         s.queued = false;
     }
 
-    ValidateSupport(tissue);
     RebuildQueues(tissue);
 }
 
