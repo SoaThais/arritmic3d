@@ -6,7 +6,7 @@ from plot_functions import (plot_vtk, plot_animation, delete_case_dir)
 import arritmic3d.arr3D_build_slab as arr_build
 
 # --- STEP 1: Configure the case directory ---
-case_dir = "out_test/3.reentry"
+case_dir = "out_test_heap/3.reentry"
 delete_case_dir(case_dir)
 
 # Ensure the subfolder for the slab exists
@@ -58,7 +58,7 @@ config = {
 
 # --- STEP 4: Run the simulation ---
 print("\n--- Running simulation ---")
-a3d.arritmic3d(case_dir, config=config)
+a3d.arritmic3d(case_dir, config=config, solver_type=a3d.PropagationSolverType.LEGACY_HEAP)
 print("Simulation completed!")
 
 plot_vtk(os.path.join(case_dir,"slab_03355.vtu"), title = "3355ms", plt_show=True)
@@ -69,7 +69,7 @@ plot_vtk(os.path.join(case_dir,"slab_03385.vtu"), title = "3385ms", plt_show=Tru
 
 # --- STEP 5: Build a larger slab ---
 
-case_dir = "out_test/3.reentry_2"
+case_dir = "out_test_heap/3.reentry_2"
 delete_case_dir(case_dir)
 
 # Ensure the subfolder for the slab exists
@@ -110,7 +110,7 @@ config = {
             "ACTIVATION_REGION": 1,
             "FIRST_ACTIVATION_TIME": 0,
             "N_STIMS_PACING": [8,2],
-            "BCL": [420,320] # 319, block before reentry. 322 late for reentry
+            "BCL": [420,321] # 319, block before reentry. 322 late for reentry
         }
     ]
 }
@@ -118,7 +118,7 @@ config = {
 
 # --- STEP 4: Run the simulation ---
 print("\n--- Running simulation ---")
-a3d.arritmic3d(case_dir, config=config)
+a3d.arritmic3d(case_dir, config=config, solver_type=a3d.PropagationSolverType.LEGACY_HEAP)
 print("Simulation completed!")
 
 plot_vtk(os.path.join(case_dir,"slab_03800.vtu"), title = "03800ms", plt_show=True)
