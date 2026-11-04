@@ -23,6 +23,7 @@
 #include "system_event_scheduler.h"
 #include "legacy_heap_propagation.h"
 #include "fim_propagation.h"
+#include "fim_eikonal_propagation.h"
 #include "front_propagation_solver.h"
 
 using std::vector;
@@ -58,7 +59,10 @@ public:
                 break;
             case PropagationSolverType::FIM:
                 propagation_solver = std::make_unique<FIMPropagation<APM, CVM>>();
-        break;
+                break;
+            case PropagationSolverType::FIMEikonal:
+                propagation_solver = std::make_unique<FIMEikonalPropagation<APM, CVM>>();
+                break;
         }
     }
     
@@ -78,6 +82,7 @@ private:
 
     friend class LegacyHeapPropagation<APM,CVM>;
     friend class FIMPropagation<APM, CVM>;
+    friend class FIMEikonalPropagation<APM, CVM>;
 
     std::vector<Stimuli> external_activations;
     void ExecuteScheduledActivation(float activation_time);

@@ -120,6 +120,10 @@ bool NodeT<APD, CVM>::ComputeActivation(float current_time_,  CardiacTissue<APD,
     else
         activated = this->apd_model.Activate(current_time_);
 
+    // if (this->id == 3021) {
+    //     printf("Activated APD %d\n", activated);
+    // }
+
     if (activated)
     {
         // Conduction velocity
@@ -138,6 +142,10 @@ template <typename APD, typename CVM>
 bool NodeT<APD, CVM>::Activate(float current_time_, int source_beat_, CardiacTissue<APD, CVM> * tissue_)
 {
     bool activated = false;
+
+    // if (this->id == 3021) {
+    //     printf("State Inact %d\n", this->GetState(current_time_) == CellActivationState::INACTIVE);
+    // }
 
     if (this->GetState(current_time_) == CellActivationState::INACTIVE) {
         if(!this->ComputeActivation(current_time_, tissue_))

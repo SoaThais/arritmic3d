@@ -7,7 +7,8 @@
 
 enum class PropagationSolverType {
     LegacyHeap,
-    FIM
+    FIM,
+    FIMEikonal
 };
 
 template <typename Tissue>

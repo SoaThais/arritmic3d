@@ -53,6 +53,9 @@ bool FIMPropagation<APM, CVM>::CanActivateAt(const Node& node, float at) const {
     if (node.type == CELL_TYPE_VOID)
         return false;
 
+    if (node.id == 3016)
+    printf("AT %f LAst AT %f Last APD %f Active %d\n", at, node.apd_model.getActivationTime(), node.apd_model.getAPD(), node.apd_model.IsActive(at));
+
     // Candidato anterior à última ativação (fonte obsoleta).
     if (at < node.apd_model.getActivationTime())
         return false;
@@ -123,6 +126,17 @@ void FIMPropagation<APM, CVM>::SetTentative(Tissue& tissue, std::size_t j, float
     s.status              = Status::LIST;
     s.tentative_potential = potential;
     s.source_at           = MAX_TIME;
+
+    if (tissue.tissue_nodes[j].id == 3016) {
+        printf(
+            "[SET TENTATIVE] at=%.8f potential=%.8f "
+            "external=%d parent=%lld\n",
+            at,
+            potential,
+            external,
+            (long long) parent
+        );
+    }
 
     Enqueue(j);
 }
@@ -354,6 +368,17 @@ bool FIMPropagation<APM, CVM>::BestCandidate(Tissue& tissue, std::size_t j, Cand
                 best.parent    = charge.parent;
                 best.beat      = charge.beat;
                 best.potential = accumulated;
+                if (node.id == 3016) {
+                    printf(
+                        "[CANDIDATE] at=%.8f potential=%.8f "
+                        "parent=%lld beat=%d recovery=%.8f\n",
+                        best.at,
+                        best.potential,
+                        (long long) best.parent,
+                        best.beat,
+                        node.recovery_time
+                    );
+                }
                 return true; 
             }
             // Se estava refratária, o laço continua para ver se tempos mais 
@@ -458,6 +483,17 @@ void FIMPropagation<APM, CVM>::RelaxWindow(Tissue& tissue, float t_start) {
             s.source_beat  = s.beat;
             s.source_potential = s.tentative_potential;
             converged_.push_back(j);
+
+            if (tissue.tissue_nodes[j].id == 3016) {
+                printf(
+                    "[FIM CONVERGED] at=%.8f source_at=%.8f "
+                    "recovery=%.8f potential=%.8f\n",
+                    s.tentative_at,
+                    s.source_at,
+                    tissue.tissue_nodes[j].recovery_time,
+                    s.tentative_potential
+                );
+            }
 
             // --- CONTAGEM DE SUMIDOUROS ---
 
@@ -603,6 +639,17 @@ void FIMPropagation<APM, CVM>::CommitNode(Tissue& tissue, std::size_t idx) {
     const int   beat = states[idx].beat;
     
     const float final_potential = states[idx].source_potential; 
+
+    if (node.id == 3016) {
+        printf(
+            "[FIM COMMIT] at=%.8f recovery=%.8f "
+            "GetState=%d IsActive=%d\n",
+            at,
+            node.recovery_time,
+            node.GetState(at) == Node::CellActivationState::ACTIVE,
+            node.apd_model.IsActive(at)
+        );
+    }
 
     ClearTentative(idx);
 

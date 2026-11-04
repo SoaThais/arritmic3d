@@ -211,18 +211,56 @@ LegacyHeapPropagation<APM, CVM>::GetState(Tissue& tissue, Node* node) {
     return propagation_states.at(NodeIndex(tissue, node));
 }
 
+// template <typename APM, typename CVM>
+// typename LegacyHeapPropagation<APM, CVM>::CellEvent*
+// LegacyHeapPropagation<APM, CVM>::ScheduleActivation(Tissue& tissue, Node* node, Node* parent, float activation_time) {
+
+//     auto& state = GetState(tissue, node);
+
+//     if(parent->parameters->safety_factor < node->parameters->safety_factor) {
+//         return nullptr;
+//     }
+
+//     if(activation_time < state.next_activation_time) {
+
+//         state.next_activation_time = activation_time;
+//         state.activation_parent    = parent;
+//         state.activation_beat      = parent->beat;
+
+//         state.next_activation_event->ChangeEvent(state.next_activation_time);
+
+//         return state.next_activation_event;
+//     }
+
+//     return nullptr;
+// }
+
 template <typename APM, typename CVM>
 typename LegacyHeapPropagation<APM, CVM>::CellEvent*
 LegacyHeapPropagation<APM, CVM>::ScheduleActivation(Tissue& tissue, Node* node, Node* parent, float activation_time) {
 
     auto& state = GetState(tissue, node);
+    
+    // Altere este ID para o nó que deseja rastrear (ex: 4329)
+    bool is_target = (node->id == 4329);
 
+    // 1. Falha por Fator de Segurança (Safety Factor)
     if(parent->parameters->safety_factor < node->parameters->safety_factor) {
+        // if (is_target) {
+        //     printf("[DEBUG-4329] FALHA SF: Pai(%d, SF:%.2f) tentou ativar Alvo(%d, SF:%.2f) em %f\n",
+        //            parent->id, parent->parameters->safety_factor, 
+        //            node->id, node->parameters->safety_factor, activation_time);
+        // }
         return nullptr;
     }
 
+    // 2. Sucesso: A onda chegou mais cedo que qualquer outra agendada
     if(activation_time < state.next_activation_time) {
-
+        // if (is_target) {
+        //     printf("[DEBUG-4329] SUCESSO: Pai(%d) agendou Alvo(%d) para %f (Bateu o tempo anterior de %f)\n",
+        //            parent->id, node->id, activation_time, state.next_activation_time);
+        // }
+        
         state.next_activation_time = activation_time;
         state.activation_parent    = parent;
         state.activation_beat      = parent->beat;
@@ -232,6 +270,12 @@ LegacyHeapPropagation<APM, CVM>::ScheduleActivation(Tissue& tissue, Node* node, 
         return state.next_activation_event;
     }
 
+    // 3. Falha por Tempo (Onda obsoleta / Mais lenta que o agendado)
+    // if (is_target) {
+    //     printf("[DEBUG-4329] FALHA TEMPO: Pai(%d) chegou em %f, mas Alvo(%d) JÁ TINHA evento melhor agendado para %f\n",
+    //            parent->id, activation_time, node->id, state.next_activation_time);
+    // }
+    
     return nullptr;
 }
 
@@ -325,7 +369,15 @@ void LegacyHeapPropagation<APM, CVM>::ProcessEvent(Tissue& tissue, CellEvent* ev
 
     LOG::Warning(ev->event_time != tissue.tissue_time, "TriggerEvent(): In node ", node_->id, "Event time mismatch. Event time is ", ev->event_time, " while current time is ", tissue.tissue_time);
 
+    // if (node_->id == 4329) {
+    //     printf("Event Time %f Tissue Time %f Next AT %f\n", ev->event_time, tissue.tissue_time, state.next_activation_time);
+    // }
+
     if (tissue.tissue_time == state.next_activation_time) {
+
+        // if (node_->id == 4329) {
+        //     printf("External_activation %d Rec Potential %f\n", state.external_activation, node_->received_potential);
+        // }
 
         if (!state.external_activation && node_->received_potential < node_->parameters->min_potential * node_->parameters->safety_factor) {
 
@@ -336,7 +388,13 @@ void LegacyHeapPropagation<APM, CVM>::ProcessEvent(Tissue& tissue, CellEvent* ev
         }
         else {
 
-            if (node_->Activate(tissue.tissue_time, state.activation_beat, &tissue)) {
+            bool activated = node_->Activate(tissue.tissue_time, state.activation_beat, &tissue);
+
+            // if (node_->id == 4329) {
+            //     printf("Activated %d\n", activated);
+            // }
+
+            if (activated) {
 
                 state.next_deactivation_event->ChangeEvent(node_->recovery_time);
                 event_queue.InsertCellEvent(state.next_deactivation_event);

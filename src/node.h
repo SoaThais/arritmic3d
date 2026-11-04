@@ -29,6 +29,8 @@ template <typename ActionPotentialModel, typename ConductionVelocityModel>
 class LegacyHeapPropagation;
 template <typename ActionPotentialModel, typename ConductionVelocityModel>
 class FIMPropagation;
+template <typename ActionPotentialModel, typename ConductionVelocityModel>
+class FIMEikonalPropagation;
 
 enum NodeDataId
 {
@@ -62,6 +64,7 @@ public:
     friend class BasicTissue<ActionPotentialModel, ConductionVelocityModel>;
     friend class LegacyHeapPropagation<ActionPotentialModel, ConductionVelocityModel>;
     friend class FIMPropagation<ActionPotentialModel, ConductionVelocityModel>;
+    friend class FIMEikonalPropagation<ActionPotentialModel, ConductionVelocityModel>;
 
     /// State of the cell.
     enum class CellActivationState : char { 
