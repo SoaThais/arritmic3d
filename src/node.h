@@ -141,6 +141,9 @@ private:
     // Activation
     float               received_potential;
 
+    std::vector<float> at_history;
+    std::vector<float> apd_history;
+    
     //void Deactivate(float current_time_);
     bool Activate(float current_time_, int source_beat_, CardiacTissue<ActionPotentialModel, ConductionVelocityModel> * tissue_);
     bool ComputeActivation(float current_time_, CardiacTissue<ActionPotentialModel, ConductionVelocityModel> * tissue_);

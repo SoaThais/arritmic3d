@@ -17,6 +17,9 @@
 #include "node.h"
 #include "error.h"
 
+#include <string>
+#include <iomanip>
+
 using std::vector;
 
 /**
@@ -293,6 +296,73 @@ void BasicTissue<APM,CVM>::SaveVTKPoints(const std::string & filename, const int
 
 
     vtk_file.close();
+}
+
+/**
+ * @brief Save the activation times history in an ACM file.
+ * @param output_dir Directory to save the file.
+ * @param prefix Prefix of the filename.
+ */
+template <typename APM, typename CVM>
+void BasicTissue<APM, CVM>::SaveActivationTimesACM (const std::string& output_dir, const std::string& prefix) const {
+    
+    std::string filepath = output_dir + "/" + prefix + ".acm";
+    std::ofstream out(filepath);
+
+    if (!out.is_open()) {
+        LOG::Error(true, "[SaveACM] Erro ao abrir arquivo para escrita: " + filepath);
+        return;
+    }
+
+    // Iterar sobre todos os nós da malha
+    for (size_t i = 0; i < this->tissue_nodes.size(); i++) {
+        const auto& node = this->tissue_nodes[i];
+        
+        // Pular nós inativos/buracos
+        if (node.type == CELL_TYPE_VOID) continue;
+
+        // Extrair coordenadas reais usando a geometria (idêntico ao SaveVTKPoints)
+        auto grid_index = node.id;
+        auto coords = tissue_geometry.GetCoords_from_GridIndex(grid_index);
+        auto real_coords = tissue_geometry.GetRealCoords_from_Coords(coords);
+
+        float cx = real_coords[0];
+        float cy = real_coords[1];
+        float cz = real_coords[2];
+
+        // Extrair espaçamento (dx, dy, dz) da geometria global
+        float dx = tissue_geometry.dx / 2.0f;
+        float dy = tissue_geometry.dy / 2.0f;
+        float dz = tissue_geometry.dz / 2.0f;
+
+        // Vetores com o histórico de batimentos (têm de ser declarados em node.h)
+        const std::vector<float>& ats = node.at_history;
+        const std::vector<float>& apds = node.apd_history;
+        
+        int num_stimulus = ats.size();
+
+        out << std::fixed << std::setprecision(2)
+            << cx << "," << cy << "," << cz << "," 
+            << dx << "," << dy << "," << dz << " " 
+            << num_stimulus << " [ ";
+
+        for (int s = 0; s < num_stimulus; ++s) {
+            out << std::setprecision(6) << ats[s] << " ";
+        }
+
+        out << "] [ ";
+
+        for (int s = 0; s < num_stimulus; ++s) {
+            // Proteção para não aceder fora dos limites do array
+            if (s < apds.size()) {
+                out << apds[s] << " ";
+            }
+        }
+
+        out << "]\n";
+    }
+
+    out.close();
 }
 
 #endif

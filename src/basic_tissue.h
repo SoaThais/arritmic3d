@@ -111,6 +111,7 @@ public:
 
     void SaveVTK(const std::string & filename) const;
     void SaveVTKPoints(const std::string & filename, const int data_id, bool binary = false) const;
+    void SaveActivationTimesACM (const std::string& output_dir, const std::string& prefix) const;
 
     void SaveState(const std::string & filename) const;
     void LoadState(const std::string & filename);
