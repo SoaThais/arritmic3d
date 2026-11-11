@@ -524,7 +524,6 @@ def run_arritmic3D(case_dir, config : dict = {}, save_run_config=True, debug_lev
 
     solver_names = {
         arritmic3d.PropagationSolverType.LEGACY_HEAP: "legacy",
-        arritmic3d.PropagationSolverType.FIM: "fim",
         arritmic3d.PropagationSolverType.FIM_EIKONAL: "fim_eikonal",
     }
 

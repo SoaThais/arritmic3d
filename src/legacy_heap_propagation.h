@@ -59,7 +59,6 @@ class LegacyHeapPropagation : public FrontPropagationSolver<CardiacTissue<APM, C
         }
 
         void Initialize(Tissue& tissue) override;
-        // void Reset(Tissue& tissue) override;
 
         float NextEventTime() const;
         bool HasPendingWork() const override;
@@ -70,22 +69,14 @@ class LegacyHeapPropagation : public FrontPropagationSolver<CardiacTissue<APM, C
 
         void Stimulate(Tissue& tissue, std::size_t node_index, float activation_time, int beat) override;
 
+        void AdvanceUntil(Tissue& tissue, float time_limit, bool inclusive);
+
+        void ScheduleExternalActivation(Tissue& tissue, Node* node, float activation_time, int beat_n);
+
         // Reconnect event pointers without resetting restored propagation bookkeeping.
         void BindEvents(Tissue& tissue);
         void SaveState(std::ofstream& f, const Tissue& tissue) const override;
         void LoadState(std::ifstream& f, Tissue& tissue) override;
-
-        /**
-        * @brief Processa um evento celular usando o algoritmo legado.
-        *
-        * Este método é, propositalmente, uma cópia estrutural do antigo
-        * CardiacTissue::TriggerEvent().
-        */
-        // void ProcessEvent(Tissue& tissue, CellEvent* ev);
-
-        void AdvanceUntil(Tissue& tissue, float time_limit, bool inclusive);
-
-        void ScheduleExternalActivation(Tissue& tissue, Node* node, float activation_time, int beat_n);
 
     private:
 
