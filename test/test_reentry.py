@@ -6,7 +6,7 @@ from plot_functions import (plot_vtk, plot_animation, delete_case_dir)
 import arritmic3d.arr3D_build_slab as arr_build
 
 # # --- STEP 1: Configure the case directory ---
-# case_dir = "out_test_fim_eikonal/3.reentry"
+# case_dir = "out_test_fim_eikonal_2/3.reentry"
 # delete_case_dir(case_dir)
 
 # # Ensure the subfolder for the slab exists
@@ -69,7 +69,7 @@ import arritmic3d.arr3D_build_slab as arr_build
 
 # --- STEP 5: Build a larger slab ---
 
-case_dir = "out_test_fim_eikonal/3.reentry_2"
+case_dir = "out_test_fim_eikonal_2/3.reentry_2"
 delete_case_dir(case_dir)
 
 # Ensure the subfolder for the slab exists
@@ -100,8 +100,8 @@ config = {
     "APD_MODEL": "TenTuscher",
     "CV_MODEL": "TenTuscher",
     "ELECTROTONIC_EFFECT": 0.0,
-    "CV_MEMORY_COEFF": 0.05,
-    "CORRECTION_FACTOR_CV": 0.9,
+    # "CV_MEMORY_COEFF": 0.05,
+    # "CORRECTION_FACTOR_CV": 0.9,
     "APD_MEMORY_COEFF": 0.0,
     "SIMULATION_DURATION": 4800,
     "VTK_OUTPUT_PERIOD": 1,
@@ -110,8 +110,8 @@ config = {
         {
             "ACTIVATION_REGION": 1,
             "FIRST_ACTIVATION_TIME": 0,
-            "N_STIMS_PACING": [8,2],
-            "BCL": [420,321] # 319, block before reentry. 322 late for reentry
+            "N_STIMS_PACING": [8,1,1],
+            "BCL": [420,321,350] # 319, block before reentry. 322 late for reentry
         }
     ]
 }
