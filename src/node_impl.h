@@ -152,9 +152,11 @@ bool NodeT<APD, CVM>::Activate(float current_time_, int source_beat_, CardiacTis
             activated = false;
         else {
             this->local_activation_time = current_time_;
+            this->recovery_time         = current_time_ + this->apd_model.getAPD();
+            this->beat                  = source_beat_;
 
-            this->recovery_time = current_time_ + this->apd_model.getAPD();
-            this->beat          = source_beat_;
+            this->at_history.push_back(current_time_);
+            this->apd_history.push_back(this->apd_model.getAPD());
 
             activated = true;
         }

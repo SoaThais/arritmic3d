@@ -111,7 +111,7 @@ config = {
             "ACTIVATION_REGION": 1,
             "FIRST_ACTIVATION_TIME": 0,
             "N_STIMS_PACING": [8,1,1],
-            "BCL": [420,321,350] # 319, block before reentry. 322 late for reentry
+            "BCL": [420,321,321] # 319, block before reentry. 322 late for reentry
         }
     ]
 }

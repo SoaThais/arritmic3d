@@ -7,6 +7,7 @@ import json
 import copy
 import csv
 import shutil
+import time
 
 import arritmic3d
 from . import arr3D_build_slab
@@ -171,9 +172,19 @@ def run_simulation(case_dir, cfg, debug_level=0, solver_type=None):
             sensor_names = tissue.GetSensorDataNames()
             WriteAllSensorData(sensors_dir, sensor_data, sensor_names)
 
+    start = time.perf_counter()
+
     # Run the entire simulation with one Python call.
     # The event loop is now inside C++.
     tissue.Run(cfg['SIMULATION_DURATION'], write_output, debug_level)
+
+    end = time.perf_counter()
+
+    print(f"Execution Time: {(end - start) / 60.0} min")
+
+    if cfg.get('SAVE_ACM', False):
+        print(f"A gravar tempos de ativação no formato ACM em {case_dir}...", flush=True)
+        tissue.SaveActivationTimesACM(case_dir, "Activation_Times")
 
     # Save final sensor data
     sensor_data = tissue.GetSensorInfo()
@@ -256,6 +267,11 @@ Examples:
         action="store_false",
         help="Do not save the run configuration."
     )
+    io_group.add_argument(
+        "--save-acm",
+        action="store_true",
+        help="Salva o histórico de tempos de ativação e APD no formato ACM no final da simulação."
+    )
 
     # Configuration group
     config_group = parser.add_argument_group("Configuration", "Load and override configuration parameters.")
@@ -324,6 +340,9 @@ def apply_config_overrides(cfg, args):
     if getattr(args, "input_file", None):
         inp = args.input_file
         cfg["VTK_INPUT_FILE"] = inp if os.path.isabs(inp) else os.path.abspath(inp)
+
+    if getattr(args, "save_acm", False):
+        cfg["SAVE_ACM"] = True
 
     return cfg
 

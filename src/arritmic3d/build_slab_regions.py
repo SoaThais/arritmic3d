@@ -49,13 +49,15 @@ def _write_field_values(grid, field, val, write_inds, n_points):
 
 
 def set_region(grid, center, radius, data, shape="circle"):
+
     """Write the values in `data` into grid.point_data for points inside the 2D mask.
 
     - center: (cx, cy) in world distance units
     - radius: scalar radius in world units (applies to the mask generation)
     - data: dict { field_name: value } where value is scalar or list-like (vector)
-    - shape: "circle", "square" or "diamond" (determines mask metric)
+    - shape: "circle", "square", "diamond" or "concave" (determines mask metric)
     """
+
     cx, cy = center
     x_coords = np.asarray(grid.x)
     y_coords = np.asarray(grid.y)
@@ -67,6 +69,8 @@ def set_region(grid, center, radius, data, shape="circle"):
 
     if shape == "circle":
         dist2d = np.sqrt((X - cx) ** 2 + (Y - cy) ** 2)
+    elif shape == "concave":
+        dist2d = np.sqrt((X - cx) ** 2 + (Y - cy) ** 2)
     elif shape == "square":
         # Chebyshev distance: max(|dx|, |dy|) <= r  => square of half-side r
         dist2d = np.maximum(np.abs(X - cx), np.abs(Y - cy))
@@ -74,9 +78,13 @@ def set_region(grid, center, radius, data, shape="circle"):
         # Manhattan distance: |dx| + |dy| <= r  => diamond shape
         dist2d = np.abs(X - cx) + np.abs(Y - cy)
     else:
-        raise ValueError("Unsupported shape: choose 'circle', 'square' or 'diamond'")
+        raise ValueError("Unsupported shape: choose 'circle', 'square', 'diamond' or 'concave'")
 
-    mask2d = dist2d <= r
+    if shape == "concave":
+        mask2d = dist2d >= r
+    else:
+        mask2d = dist2d <= r
+
     i_inds, j_inds = np.nonzero(mask2d)
 
     nx = x_coords.size
@@ -100,7 +108,6 @@ def set_region(grid, center, radius, data, shape="circle"):
     # For each field in data, prepare target array (create if necessary) and assign value(s)
     for field, val in data.items():
         _write_field_values(grid, field, val, flat_inds_all, n_points)
-
 
 
 def load_regions_from_file(path):
@@ -153,7 +160,7 @@ def validate_region(region, index):
         raise ValueError(f"Region {index}: missing required field 'shape'.")
     shape = str(region["shape"]).lower()
 
-    if shape in ("circle", "square", "diamond"):
+    if shape in ("circle", "square", "diamond", "concave"):
         required = ["cx", "cy", "r1", "r2"]
     elif shape == "side":
         required = ["side"]
@@ -251,7 +258,7 @@ def apply_region(grid, region):
     known = {"shape", "cx", "cy", "r1", "r2", "side", "ids"}
     targets = {k: region[k] for k in region.keys() if k not in known}
 
-    if shape in ("circle", "square", "diamond"):
+    if shape in ("circle", "square", "diamond", "concave"):
         cx = float(region["cx"])
         cy = float(region["cy"])
         center = (cx, cy)

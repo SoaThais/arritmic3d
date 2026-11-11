@@ -177,6 +177,7 @@ Examples:
 
 
 def build_slab(args = None, args_list = [], save=True):
+    
     """
     Build the slab grid based on parsed arguments and optionally save to file.
 
