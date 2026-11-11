@@ -375,7 +375,6 @@ void CardiacTissue<APM, CVM>::Run(float end_time, std::function<void(float)> out
         throw std::runtime_error("Run: end_time is in the past.");
     }
 
-    // Mantém o comportamento do Run antigo:
     // não processa eventos se já estamos no tempo final.
     if (this->tissue_time >= end_time)
         return;
@@ -385,8 +384,7 @@ void CardiacTissue<APM, CVM>::Run(float end_time, std::function<void(float)> out
     while (true) {
 
         // Não há evento do sistema até end_time.
-        if (scheduler.IsEmpty() ||
-            scheduler.GetFirst().event_time > end_time) {
+        if (scheduler.IsEmpty() || scheduler.GetFirst().event_time > end_time) {
 
             propagation_solver->AdvanceUntil(*this, end_time, true);
 
@@ -412,10 +410,6 @@ void CardiacTissue<APM, CVM>::Run(float end_time, std::function<void(float)> out
 
         // 2. Se a prioridade do evento do sistema não for 0,
         // processa também os eventos celulares em t primeiro.
-        //
-        // Isso reproduz a regra antiga:
-        // prioridade 0 do sistema vence o empate;
-        // caso contrário, o evento celular vence.
         if (ev.priority != 0) {
             propagation_solver->AdvanceUntil(*this, t, true);
             this->tissue_time = t;
@@ -440,10 +434,6 @@ void CardiacTissue<APM, CVM>::Run(float end_time, std::function<void(float)> out
             const int priority = (event_type == SystemEventType::EXT_ACTIVATION) ? 0 : 1;
             scheduler.Insert(t + period, event_type, priority);
         }
-
-        // Não interrompe aqui quando t == end_time:
-        // ainda pode haver outros eventos no mesmo instante.
-        // A próxima iteração processará os eventos restantes.
     }
 }
 

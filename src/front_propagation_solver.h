@@ -25,13 +25,7 @@ public:
     // virtual void Reset(Tissue& tissue) = 0;
 
     // Consulta a fila ou estrutura interna do solver.
-    // virtual float NextEventTime() const = 0;
     virtual bool HasPendingWork() const = 0;
-
-    // virtual std::size_t NextEventNodeIndex(const Tissue& tissue) const = 0;
-
-    // Processa o próximo evento de propagação.
-    // virtual std::size_t AdvanceNext(Tissue& tissue) = 0;
 
     // Avança a propagação interna até o limite de tempo.
     //
