@@ -306,12 +306,14 @@ double FIMEikonalPropagation<APM, CVM>::Objective(Node& node, double lambda, dou
 
         double AT_calc = T0 + d / v;
         
-        // RELAXAÇÃO NUMÉRICA: Força a convergência cortando a oscilação pela metade
-        if (iter > 0) {
-            AT = 0.5 * old_AT + 0.5 * AT_calc; 
-        } else {
-            AT = AT_calc;
-        }
+        // // RELAXAÇÃO NUMÉRICA: Força a convergência cortando a oscilação pela metade
+        // if (iter > 0) {
+        //     AT = 0.5 * old_AT + 0.5 * AT_calc; 
+        // } else {
+        //     AT = AT_calc;
+        // }
+
+        AT = AT_calc;
         
         DI = AT - rt_old;
 
@@ -580,6 +582,67 @@ float FIMEikonalPropagation<APM, CVM>::MinListTime() const {
 // Estímulo externo (compute_boundary_conditions_FIM)
 // ---------------------------------------------------------------------------
 
+// template <typename APM, typename CVM>
+// void FIMEikonalPropagation<APM, CVM>::Stimulate(Tissue& tissue, std::size_t node_index, float activation_time, int beat) {
+
+//     if (node_index >= tissue.tissue_nodes.size())
+//         throw std::out_of_range("FIMEikonalPropagation::Stimulate: invalid node index.");
+
+//     Node& node = tissue.tissue_nodes[node_index];
+//     auto& s    = states_[node_index];
+
+//     if (node.type == CELL_TYPE_VOID)
+//         return;
+
+//     if (node.GetState(activation_time) != Node::CellActivationState::INACTIVE)
+//         return;
+
+//     if (!(activation_time < s.at))
+//         return;
+
+//     // O legado agenda e depois falha em Activate(); aqui a falha é antecipada
+//     // para que os vizinhos nunca derivem de uma ativação que não vai ocorrer.
+//     if (!CanActivateAt(node, activation_time))
+//         return;
+
+//     // O AT do estímulo é fixo (não é recalculado) e o nó sai da lista, se estava.
+//     s.at     = activation_time;
+//     s.beat   = beat;
+//     s.status = Status::REST;
+//     s.external = true;
+
+//     MarkPending(node_index);
+
+//     // Os vizinhos só são avaliados em FlushSeeds, depois que todos os nós do
+//     // estímulo foram marcados (como no original: primeiro AT = TA em todas as
+//     // células do estímulo, depois active_neighbors).
+//     if (!s.seed_pending) {
+//         s.seed_pending = true;
+//         seeds_.push_back(node_index);
+//     }
+
+//     node.received_potential = 1.0;
+// }
+
+// template <typename APM, typename CVM>
+// void FIMEikonalPropagation<APM, CVM>::FlushSeeds(Tissue& tissue) {
+
+//     if (seeds_.empty())
+//         return;
+
+//     vector<std::size_t> seeds;
+//     seeds.swap(seeds_);
+
+//     for (std::size_t idx : seeds) {
+
+//         auto& s = states_[idx];
+//         s.seed_pending = false;
+
+//         if (s.external && s.at != MAX_TIME && s.status == Status::REST)
+//             ActivateNeighbors(tissue, idx);
+//     }
+// }
+
 template <typename APM, typename CVM>
 void FIMEikonalPropagation<APM, CVM>::Stimulate(Tissue& tissue, std::size_t node_index, float activation_time, int beat) {
 
@@ -589,21 +652,38 @@ void FIMEikonalPropagation<APM, CVM>::Stimulate(Tissue& tissue, std::size_t node
     Node& node = tissue.tissue_nodes[node_index];
     auto& s    = states_[node_index];
 
+    // if (node.id == 60621) {
+    //     printf("AT %f Last AT Tent %f Last AT %f\n", activation_time, s.at, node.apd_model.getActivationTime());
+    // }
+
     if (node.type == CELL_TYPE_VOID)
         return;
 
-    if (node.GetState(activation_time) != Node::CellActivationState::INACTIVE)
-        return;
+    // if (node.GetState(activation_time) != Node::CellActivationState::INACTIVE)
+    //     return;
 
     if (!(activation_time < s.at))
         return;
 
-    // O legado agenda e depois falha em Activate(); aqui a falha é antecipada
-    // para que os vizinhos nunca derivem de uma ativação que não vai ocorrer.
-    if (!CanActivateAt(node, activation_time))
+    // ALTERAÇÃO PARA ESTÍMULO EXTERNO:
+    // Não usa CanActivateAt aqui para não barrar por di_threshold.
+    // Permite que o estímulo ative o nó localmente se não for obsoleto,
+    // não estiver ativo e o modelo APD aceitar.
+    if (activation_time < node.apd_model.getActivationTime())
         return;
 
-    // O AT do estímulo é fixo (não é recalculado) e o nó sai da lista, se estava.
+    // if (node.apd_model.IsActive(activation_time))
+    //     return;
+
+    // APM probe = node.apd_model;
+    // if (!probe.Activate(activation_time))
+    //     return;
+
+    // if (node.id == 60621) {
+    //     printf("No marcado para ativacao\n");
+    // }
+
+    // O AT do estímulo é fixo e o nó é marcado para ativação
     s.at     = activation_time;
     s.beat   = beat;
     s.status = Status::REST;
@@ -611,9 +691,6 @@ void FIMEikonalPropagation<APM, CVM>::Stimulate(Tissue& tissue, std::size_t node
 
     MarkPending(node_index);
 
-    // Os vizinhos só são avaliados em FlushSeeds, depois que todos os nós do
-    // estímulo foram marcados (como no original: primeiro AT = TA em todas as
-    // células do estímulo, depois active_neighbors).
     if (!s.seed_pending) {
         s.seed_pending = true;
         seeds_.push_back(node_index);
@@ -636,8 +713,24 @@ void FIMEikonalPropagation<APM, CVM>::FlushSeeds(Tissue& tissue) {
         auto& s = states_[idx];
         s.seed_pending = false;
 
-        if (s.external && s.at != MAX_TIME && s.status == Status::REST)
-            ActivateNeighbors(tissue, idx);
+        if (s.external && s.at != MAX_TIME && s.status == Status::REST) {
+            Node& node = tissue.tissue_nodes[idx];
+
+            // Calcula o DI no momento do estímulo externo
+            const double rt_old = static_cast<double>(node.apd_model.getActivationTime()) + 
+                                  static_cast<double>(node.apd_model.getAPD());
+            const double di = static_cast<double>(s.at) - rt_old;
+
+            // Só propaga para os vizinhos se:
+            // 1. For a primeira ativação (não tem ativação prévia), OU
+            // 2. O DI for suficiente (>= di_threshold)
+            const bool has_prev_activation = (node.apd_model.getActivationTime() > 0.0f);
+            if (!has_prev_activation || di >= static_cast<double>(params.di_threshold)) {
+                ActivateNeighbors(tissue, idx);
+            }
+            // Se di < params.di_threshold, não chama ActivateNeighbors:
+            // O nó é ativado normalmente em CommitFinalized, mas a propagação morre nele.
+        }
     }
 }
 
@@ -822,6 +915,38 @@ void FIMEikonalPropagation<APM, CVM>::CommitFinalized(Tissue& tissue, float t_li
     }
 }
 
+// template <typename APM, typename CVM>
+// void FIMEikonalPropagation<APM, CVM>::CommitNode(Tissue& tissue, std::size_t idx) {
+
+//     Node& node = tissue.tissue_nodes[idx];
+//     auto& s    = states_[idx];
+
+//     const float at   = s.at;
+//     const int   beat = s.beat;
+
+//     // O nó deixa de ter ativação pendente (e de ser fonte).
+//     s.at           = MAX_TIME;
+//     s.beat         = -1;
+//     s.external     = false;
+//     s.status       = Status::REST;
+
+//     if (node.recovery_time != MAX_TIME && node.recovery_time <= at)
+//         ApplyRecovery(tissue, idx);
+
+//     if (at > tissue.tissue_time)
+//         tissue.tissue_time = at;
+
+//     node.received_potential = 1.0;
+
+//     if (node.Activate(at, beat, &tissue)) {
+//         tissue.apd_variation += node.apd_model.getDeltaAPD();
+//         recovery_heap_.emplace(node.recovery_time, idx);
+//     }
+
+//     if (node.parameters != nullptr && node.parameters->sensor)
+//         tissue.sensor_dict.AddData(node.id, node.GetData(at));
+// }
+
 template <typename APM, typename CVM>
 void FIMEikonalPropagation<APM, CVM>::CommitNode(Tissue& tissue, std::size_t idx) {
 
@@ -830,8 +955,8 @@ void FIMEikonalPropagation<APM, CVM>::CommitNode(Tissue& tissue, std::size_t idx
 
     const float at   = s.at;
     const int   beat = s.beat;
+    const bool  is_external = s.external;
 
-    // O nó deixa de ter ativação pendente (e de ser fonte).
     s.at           = MAX_TIME;
     s.beat         = -1;
     s.external     = false;
@@ -845,7 +970,32 @@ void FIMEikonalPropagation<APM, CVM>::CommitNode(Tissue& tissue, std::size_t idx
 
     node.received_potential = 1.0;
 
+    // if (node.id == 60621) {
+    //     printf("Tentando ativar no\n");
+    // }
+
+    // Se for estímulo externo e Activate() retornar falso devido a DI mínimo na curva de APD,
+    // ainda assim atualizamos o recovery_time para a célula registrar o potencial
     if (node.Activate(at, beat, &tissue)) {
+
+        // if (node.id == 60621) {
+        //     printf("No ativado\n");
+        // }
+
+        tissue.apd_variation += node.apd_model.getDeltaAPD();
+        recovery_heap_.emplace(node.recovery_time, idx);
+    } 
+    else if (is_external) {
+        // Força o cálculo do APD pela curva/superfície ignorando a restrição de célula ativa
+        node.apd_model.ForceActivate(at);
+        
+        node.local_activation_time = at;
+        node.beat                  = beat;
+        node.blocked               = false;
+        node.recovery_time         = at + node.apd_model.getAPD();
+        node.at_history.push_back(at);
+        node.apd_history.push_back(node.apd_model.getAPD());
+
         tissue.apd_variation += node.apd_model.getDeltaAPD();
         recovery_heap_.emplace(node.recovery_time, idx);
     }

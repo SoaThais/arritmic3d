@@ -18,7 +18,7 @@ def run (case_dir, solver_type):
         "--field", "restitution_model", "8", # Tecido saudável
         # Define uma pequena região central e atribui-lhe o activation_region 1
         "--region", '{"shape" : "circle", "cx" : 25.0, "cy" : 25.0, "r1" : 2.5, "r2" : 2.5, "activation_region" : 1}',
-        # "--field", "fibers_orientation", "[1,0,0]"
+        "--field", "fibers_orientation", "[1,0,0]"
     ]
 
     a3d.build_slab(args_list=slab_args, save=True)
@@ -36,7 +36,7 @@ def run (case_dir, solver_type):
         "SIMULATION_DURATION": 8000,  # 100 ms é suficiente para ver a onda expandir
         "VTK_OUTPUT_PERIOD": 1,
         "VTK_OUTPUT_INITIAL_TIME": 8000,
-        # "COND_VELOC_TRANSVERSAL_REDUCTION": 0.268355,
+        "COND_VELOC_TRANSVERSAL_REDUCTION": 0.268355,
         "PROTOCOL": [
             {
                 "ACTIVATION_REGION": 1,  # Dispara a região central que criámos
@@ -52,13 +52,13 @@ def run (case_dir, solver_type):
     a3d.arritmic3d(case_dir, config=config, solver_type=solver_type)
 
 # --- HEAP ---
-case_dir    = "Tests/HEAP/Isotropic_Circular_Wave_D1"
+case_dir    = "Tests/HEAP/Anisotropic_Circular_Wave"
 solver_type = a3d.PropagationSolverType.LEGACY_HEAP
 
 run(case_dir, solver_type)
 
 # --- FIM ---
-case_dir    = "Tests/FIM/Isotropic_Circular_Wave_D1"
+case_dir    = "Tests/FIM/Anisotropic_Circular_Wave"
 solver_type = a3d.PropagationSolverType.FIM_EIKONAL
 
 run(case_dir, solver_type)

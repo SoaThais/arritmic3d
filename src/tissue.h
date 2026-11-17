@@ -22,7 +22,6 @@
 #include "basic_tissue.h"
 #include "system_event_scheduler.h"
 #include "legacy_heap_propagation.h"
-#include "fim_propagation.h"
 #include "fim_eikonal_propagation.h"
 #include "front_propagation_solver.h"
 
@@ -44,60 +43,56 @@ struct Stimuli {
 template <typename APM,typename CVM>
 class CardiacTissue : public BasicTissue<APM,CVM>
 {
-public:
+    public:
 
-    using Node = NodeT<APM,CVM>;
+        using Node = NodeT<APM,CVM>;
 
-    std::unique_ptr<FrontPropagationSolver<CardiacTissue<APM, CVM>>> propagation_solver;
+        std::unique_ptr<FrontPropagationSolver<CardiacTissue<APM, CVM>>> propagation_solver;
 
-    CardiacTissue(int size_x_, int size_y_, int size_z_, float dx_, float dy_, float dz_, PropagationSolverType solver_type = PropagationSolverType::LegacyHeap) :
-        BasicTissue<APM,CVM>(size_x_, size_y_, size_z_, dx_, dy_, dz_) {
-        switch (solver_type) {
+        CardiacTissue(int size_x_, int size_y_, int size_z_, float dx_, float dy_, float dz_, PropagationSolverType solver_type = PropagationSolverType::LegacyHeap) :
+            BasicTissue<APM,CVM>(size_x_, size_y_, size_z_, dx_, dy_, dz_) {
+            switch (solver_type) {
 
-            case PropagationSolverType::LegacyHeap:
-                propagation_solver = std::make_unique<LegacyHeapPropagation<APM, CVM>>();
-                break;
-            case PropagationSolverType::FIM:
-                propagation_solver = std::make_unique<FIMPropagation<APM, CVM>>();
-                break;
-            case PropagationSolverType::FIMEikonal:
-                propagation_solver = std::make_unique<FIMEikonalPropagation<APM, CVM>>();
-                break;
+                case PropagationSolverType::LegacyHeap:
+                    propagation_solver = std::make_unique<LegacyHeapPropagation<APM, CVM>>();
+                    break;
+                case PropagationSolverType::FIMEikonal:
+                    propagation_solver = std::make_unique<FIMEikonalPropagation<APM, CVM>>();
+                    break;
+            }
         }
-    }
-    
-    SystemEventType update(int debug = 0);
+        
+        SystemEventType update(int debug = 0);
 
-    void ScheduleActivation(const vector<size_t> & nodes, float activation_time, int beat);
-    void ExternalActivation(const vector<size_t> & nodes, float activation_time, int beat_n);
-    
-    void Run(float end_time, std::function<void(float)> output_callback = nullptr, int debug = 0);
+        void ScheduleActivation(const vector<size_t> & nodes, float activation_time, int beat);
+        void ExternalActivation(const vector<size_t> & nodes, float activation_time, int beat_n);
+        
+        void Run(float end_time, std::function<void(float)> output_callback = nullptr, int debug = 0);
 
-    void ResetVariations() { apd_variation = 0.0; cv_variation = 0.0; }
-    float GetAPDMeanVariation() const { return apd_variation / this->GetNumLiveNodes(); }
-    float GetCVVariation() const { return cv_variation / this->GetNumLiveNodes(); }
-    void SetLongAPDReactivation(bool val) { long_apd_reactivation = val; }
+        void ResetVariations() { apd_variation = 0.0; cv_variation = 0.0; }
+        float GetAPDMeanVariation() const { return apd_variation / this->GetNumLiveNodes(); }
+        float GetCVVariation() const { return cv_variation / this->GetNumLiveNodes(); }
+        void SetLongAPDReactivation(bool val) { long_apd_reactivation = val; }
 
-private:
+    private:
 
-    friend class LegacyHeapPropagation<APM,CVM>;
-    friend class FIMPropagation<APM, CVM>;
-    friend class FIMEikonalPropagation<APM, CVM>;
+        friend class LegacyHeapPropagation<APM,CVM>;
+        friend class FIMEikonalPropagation<APM, CVM>;
 
-    std::vector<Stimuli> external_activations;
-    void ExecuteScheduledActivation(float activation_time);
+        std::vector<Stimuli> external_activations;
+        void ExecuteScheduledActivation(float activation_time);
 
-    void OnInitComplete() override;
+        void OnInitComplete() override;
 
-    void SaveAdditionalState(std::ofstream& f) const override;
-    void LoadAdditionalState(std::ifstream& f) override;
+        void SaveAdditionalState(std::ofstream& f) const override;
+        void LoadAdditionalState(std::ifstream& f) override;
 
-    void OnStateLoaded() override;
+        void OnStateLoaded() override;
 
-    bool long_apd_reactivation  = false;
-    float apd_plateau_duration  = 0.8; // Percentage of APD considered as plateau for reactivation
-    float apd_variation         = 0.0;
-    float cv_variation          = 0.0;
+        bool long_apd_reactivation  = false;
+        float apd_plateau_duration  = 0.8; // Percentage of APD considered as plateau for reactivation
+        float apd_variation         = 0.0;
+        float cv_variation          = 0.0;
 };
 
 template <typename APM, typename CVM>
@@ -113,7 +108,7 @@ void CardiacTissue<APM, CVM>::OnStateLoaded() {
 template <typename APM, typename CVM>
 void CardiacTissue<APM, CVM>::SaveAdditionalState(std::ofstream& f) const {
 
-    // Estado pertencente ao tecido: estímulos externos agendados.
+    // State belonging to the tissue: scheduled external stimuli.
     const size_t n_stimuli = external_activations.size();
 
     f.write(
@@ -153,7 +148,7 @@ void CardiacTissue<APM, CVM>::SaveAdditionalState(std::ofstream& f) const {
         );
     }
 
-    // O solver concreto persiste seu próprio estado.
+    // The concrete solver persists its own state.
     propagation_solver->SaveState(f, *this);
 
     if (!f) {
@@ -237,7 +232,7 @@ void CardiacTissue<APM, CVM>::LoadAdditionalState(std::ifstream& f) {
         );
     }
 
-    // A implementação concreta restaura seu próprio estado.
+    // The concrete implementation restores its own state.
     propagation_solver->LoadState(f, *this);
 
     if (!f) {
@@ -302,21 +297,21 @@ void CardiacTissue<APM, CVM>::ExecuteScheduledActivation(float activation_time) 
 
 //     while (this->tissue_time < end_time) {
 
-//         // Não há evento do sistema antes do fim:
-//         // avança a propagação diretamente até end_time.
+//         // No system event before the end:
+//         // advances propagation directly to end_time.
 //         if (scheduler.IsEmpty() || scheduler.GetFirst().event_time > end_time) {
 //             propagation_solver->AdvanceUntil(*this, end_time, true);
 //             this->tissue_time = end_time;
 //             break;
 //         }
 
-//         // Instante do próximo evento do sistema.
+//         // Timestamp of the next system event.
 //         float t = scheduler.GetFirst().event_time;
 
 //         if (t < this->tissue_time)
 //             throw std::runtime_error("System event is in the past.");
 
-//         // Coleta todos os eventos do sistema nesse instante.
+//         // Collects all system events at this timestamp.
 //         std::vector<SystemEvent> events_at_t;
 
 //         while (!scheduler.IsEmpty() && scheduler.GetFirst().event_time == t) {
@@ -324,12 +319,12 @@ void CardiacTissue<APM, CVM>::ExecuteScheduledActivation(float activation_time) 
 //             scheduler.ExtractFirst();
 //         }
 
-//         // 1. Propaga estritamente antes de t.
+//         // 1. Propagate strictly before t.
 //         propagation_solver->AdvanceUntil(*this, t, false);
 
 //         this->tissue_time = t;
 
-//         // 2. Executa os estímulos externos em t.
+//         // 2. Execute external stimuli at t.
 //         bool has_stimulus = false;
 
 //         for (const auto& ev : events_at_t) {
@@ -342,12 +337,12 @@ void CardiacTissue<APM, CVM>::ExecuteScheduledActivation(float activation_time) 
 //             ExecuteScheduledActivation(t);
 //         }
 
-//         // 3. Processa a propagação em t.
+//         // 3. Process propagation at t.
 //         propagation_solver->AdvanceUntil(*this, t, true);
 
 //         this->tissue_time = t;
 
-//         // 4. Trata as saídas e os demais eventos do sistema.
+//         // 4. Handle outputs and other system events.
 //         for (const auto& ev : events_at_t) {
 
 //             if (ev.type == SystemEventType::FILE_WRITE) {
@@ -355,7 +350,7 @@ void CardiacTissue<APM, CVM>::ExecuteScheduledActivation(float activation_time) 
 //                     output_callback(t);
 //             }
 
-//             // Reagenda os eventos periódicos do sistema.
+//             // Reschedule periodic system events.
 //             float period = this->timer.at(int(ev.type));
 
 //             if (period > 0.0f) {
@@ -375,7 +370,7 @@ void CardiacTissue<APM, CVM>::Run(float end_time, std::function<void(float)> out
         throw std::runtime_error("Run: end_time is in the past.");
     }
 
-    // não processa eventos se já estamos no tempo final.
+    // Do not process events if we are already at the end time.
     if (this->tissue_time >= end_time)
         return;
 
@@ -383,7 +378,7 @@ void CardiacTissue<APM, CVM>::Run(float end_time, std::function<void(float)> out
 
     while (true) {
 
-        // Não há evento do sistema até end_time.
+        // No system event up to end_time.
         if (scheduler.IsEmpty() || scheduler.GetFirst().event_time > end_time) {
 
             propagation_solver->AdvanceUntil(*this, end_time, true);
@@ -392,7 +387,7 @@ void CardiacTissue<APM, CVM>::Run(float end_time, std::function<void(float)> out
             break;
         }
 
-        // Considera somente o próximo evento do sistema.
+        // Consider only the next system event.
         const SystemEvent ev = scheduler.GetFirst();
         const float t = ev.event_time;
         const SystemEventType event_type = ev.type;
@@ -403,19 +398,19 @@ void CardiacTissue<APM, CVM>::Run(float end_time, std::function<void(float)> out
 
         LOG::Info( debug > 0, "System event at t=", t, " type=", int(event_type), " priority=", ev.priority);
 
-        // 1. Processa eventos celulares estritamente anteriores a t.
+        // 1. Process cellular events strictly prior to t.
         propagation_solver->AdvanceUntil(*this, t, false);
 
         this->tissue_time = t;
 
-        // 2. Se a prioridade do evento do sistema não for 0,
-        // processa também os eventos celulares em t primeiro.
+        // 2. If the system event priority is not 0,
+        // process cellular events at t first as well.
         if (ev.priority != 0) {
             propagation_solver->AdvanceUntil(*this, t, true);
             this->tissue_time = t;
         }
 
-        // 3. Remove e processa apenas este evento do sistema.
+        // 3. Remove and process only this system event.
         scheduler.ExtractFirst();
 
         if (event_type == SystemEventType::EXT_ACTIVATION) {
@@ -427,7 +422,7 @@ void CardiacTissue<APM, CVM>::Run(float end_time, std::function<void(float)> out
             }
         }
 
-        // 4. Reagenda o evento periódico, preservando a regra antiga.
+        // 4. Reschedule the periodic event, preserving the old rule.
         const float period = this->timer.at(int(event_type));
 
         if (period > 0.0f) {
@@ -551,7 +546,7 @@ void CardiacTissue<APM, CVM>::Run(float end_time, std::function<void(float)> out
  * @param activation_time Time of activation.
  *
  * @todo If the node is already active, generates a core-dump.
-*/
+ */
 template <typename APM,typename CVM>
 void CardiacTissue<APM,CVM>::ExternalActivation(const vector<size_t> & node_ids, float activation_time, int beat_n) {
     

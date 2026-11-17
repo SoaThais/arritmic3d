@@ -13,11 +13,11 @@ import pyvista as pv
 import arritmic3d as a3d
 
 # --- protocolo ---------------------------------------------------------------
-N_STIMS = [8, 1, 1]   # 8 de S1, 1 de S2 (fixo), 1 de S3 (variavel)
+N_STIMS = [1, 1]   # 8 de S1, 1 de S2 (fixo), 1 de S3 (variavel)
 FIRST_TIME = 0.0
-BCL_S1 = 420
-BCL_S2 = 321          # <--- BCL do S2 fixo (ajuste conforme necessario)
-DURATION = 4800
+BCL_S1 = 1000
+BCL_S2 = 350          # <--- BCL do S2 fixo (ajuste conforme necessario)
+DURATION = 2000
 LATE_MARGIN = 500.0   # ms depois do ultimo estimulo
 BLOCK_FRAC = 0.95
 SLAB_ARGS = [

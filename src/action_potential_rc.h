@@ -135,6 +135,23 @@ public:
         return true;
     };
 
+    bool ForceActivate(float new_ta)
+    {
+        float raw_di = new_ta - (this->ta + this->apd);
+        // Se di for negativo (célula ainda ativa), avalia a spline a partir de 0.0 (ou do início da curva)
+        float eval_di = std::max(0.0f, raw_di);
+
+        float new_apd = restitution_curve->getValue(eval_di) * this->correction_factor;
+        if (new_apd <= 0.0f)
+            new_apd = this->apd; // Fallback caso a spline devolva <= 0 em eval_di = 0
+
+        this->last_di = raw_di;
+        this->delta_apd = std::fabs(new_apd - this->apd);
+        this->apd = new_apd;
+        this->ta = new_ta;
+        return true;
+    };
+
     /**
      * @brief Simple polynomial approximation of a Ventricular Cardiomyocyte Action Potential.
      *

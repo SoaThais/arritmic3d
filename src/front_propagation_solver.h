@@ -1,4 +1,3 @@
-
 #ifndef FRONT_PROPAGATION_SOLVER_H
 #define FRONT_PROPAGATION_SOLVER_H
 
@@ -7,7 +6,6 @@
 
 enum class PropagationSolverType {
     LegacyHeap,
-    FIM,
     FIMEikonal
 };
 
@@ -17,29 +15,29 @@ public:
 
     virtual ~FrontPropagationSolver() = default;
 
-    // Identifica a implementação concreta.
+    // Identifies the concrete implementation.
     virtual PropagationSolverType Type() const = 0;
 
-    // Inicializa ou reinicializa o estado da propagação.
+    // Initializes or reinitializes the propagation state.
     virtual void Initialize(Tissue& tissue) = 0;
     // virtual void Reset(Tissue& tissue) = 0;
 
-    // Consulta a fila ou estrutura interna do solver.
+    // Queries the solver's internal queue or structure.
     virtual bool HasPendingWork() const = 0;
 
-    // Avança a propagação interna até o limite de tempo.
+    // Advances internal propagation up to the time limit.
     //
-    // inclusive = false: processa instantes < time_limit
-    // inclusive = true:  processa instantes <= time_limit
+    // inclusive = false: processes instants < time_limit
+    // inclusive = true:  processes instants <= time_limit
     //
-    // Nenhuma ativação ou recuperação fisiológica posterior
-    // ao limite solicitado pode ser efetivada.
+    // No physiological activation or recovery after
+    // the requested limit may be committed.
     virtual void AdvanceUntil(Tissue& tissue, float time_limit, bool inclusive) = 0;
 
-    // Agenda a ativação de um nó por um estímulo externo.
+    // Schedules the activation of a node by an external stimulus.
     virtual void Stimulate(Tissue& tissue, std::size_t node_index, float activation_time, int beat ) = 0;
 
-    // Persistência do estado interno do solver.
+    // Persistence of the solver's internal state.
     virtual void SaveState(std::ofstream& state_file, const Tissue& tissue ) const = 0;
     virtual void LoadState(std::ifstream& state_file, Tissue& tissue ) = 0;
 

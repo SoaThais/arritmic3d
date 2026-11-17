@@ -301,9 +301,9 @@ Examples:
 
     parser.add_argument(
         "--solver",
-        choices=["legacy", "fim", "fim_eikonal"],
+        choices=["legacy", "fim_eikonal"],
         default="legacy",
-        help="Propagation solver: legacy heap, FIM or FIM eikonal."
+        help="Propagation solver: legacy heap, FIM eikonal."
     )
 
     return parser
@@ -592,7 +592,6 @@ def main():
 
     solver_map = {
         "legacy": arritmic3d.PropagationSolverType.LEGACY_HEAP,
-        "fim": arritmic3d.PropagationSolverType.FIM,
         "fim_eikonal": arritmic3d.PropagationSolverType.FIM_EIKONAL,
     }
 

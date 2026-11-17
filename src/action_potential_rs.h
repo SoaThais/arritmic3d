@@ -139,6 +139,31 @@ public:
         return true;
     };
 
+    bool ForceActivate(float new_ta)
+    {
+        float raw_di = new_ta - (this->ta + this->apd);
+        float eval_di = std::max(0.0f, raw_di);
+
+        float new_apd = restitution_model->getValue(this->apd, eval_di);
+        if (restitution_model->is_novalue(new_apd))
+        {
+            // Se eval_di = 0 ainda cair fora do domínio da superfície 2D,
+            // usa o equilíbrio ou mantém o APD atual para não descartar o estímulo
+            new_apd = this->apd;
+        }
+        else
+        {
+            new_apd *= this->parameters->correction_factor_apd;
+            new_apd = this->parameters->apd_memory_coeff * this->apd + (1.0f - this->parameters->apd_memory_coeff) * new_apd;
+        }
+
+        this->last_di = raw_di;
+        this->delta_apd = std::fabs(new_apd - this->apd);
+        this->apd = new_apd;
+        this->ta = new_ta;
+        return true;
+    };
+
     /**
      * @brief Simple polynomial approximation of a Ventricular Cardiomyocyte Action Potential.
      *

@@ -32,8 +32,10 @@ def resolve_activation_region(act_region, grid):
     elif isinstance(act_region, int):
         if 'activation_region' not in grid.point_data:
             raise ValueError("Grid missing 'activation_region' field for group lookup.")
-        act_region_field = np.array(grid.point_data['activation_region'])
-        nodes = np.where(act_region_field == act_region)[0].tolist()
+        # act_region_field = np.array(grid.point_data['activation_region'])
+        # nodes = np.where(act_region_field == act_region)[0].tolist()
+        act_region_field = np.asarray(grid.point_data['activation_region'], dtype=int)
+        nodes = np.where((act_region_field & act_region) != 0)[0].tolist()
         if not nodes:
             raise ValueError(f"No nodes found with activation_region group ID {act_region}.")
         return nodes

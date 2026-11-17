@@ -44,7 +44,6 @@ PYBIND11_MODULE(MODULE_NAME, m) {
 
      py::enum_<PropagationSolverType>(m, "PropagationSolverType")
           .value("LEGACY_HEAP", PropagationSolverType::LegacyHeap)
-          .value("FIM", PropagationSolverType::FIM)
           .value("FIM_EIKONAL", PropagationSolverType::FIMEikonal)
           .export_values();
 

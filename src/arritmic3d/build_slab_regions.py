@@ -3,27 +3,23 @@ import os
 import numpy as np
 
 
-
-
-def _write_field_values(grid, field, val, write_inds, n_points):
+def _write_field_values(grid, field, val, write_inds, n_points, mode="overwrite"):
     """
     Create/validate the target field array in grid.point_data and write `val` at indices `write_inds`.
-    - field: field name (string)
-    - val: scalar or vector-like
-    - write_inds: 1D array of flat point indices to write into
-    - n_points: total number of points in grid
+    - mode: 
+        * "overwrite": substitui o valor existente (comportamento padrão).
+        * "bitwise_or": combina bits (ex: 1 | 2 = 3), permitindo estímulos sobrepostos independentes.
+        * "keep": só escreve onde o nó ainda não tem valor atribuído (valor == 0).
     """
     is_vector = isinstance(val, (list, tuple, np.ndarray)) and not isinstance(val, (str, bytes))
 
     if field in grid.point_data:
         current = grid.point_data[field].copy()
-        # existing scalar
         if current.ndim == 1:
             if is_vector:
                 raise ValueError(f"Field '{field}' exists as scalar but region provides vector value.")
             target = current
         else:
-            # existing vector
             if not is_vector:
                 raise ValueError(f"Field '{field}' exists as vector but region provides scalar value.")
             comps = current.shape[1]
@@ -31,33 +27,54 @@ def _write_field_values(grid, field, val, write_inds, n_points):
                 raise ValueError(f"Field '{field}' expects {comps} components, region provides {len(val)}.")
             target = current
     else:
-        # create field based on val type
         if is_vector:
             comps = len(val)
             target = np.zeros((n_points, comps), dtype=float)
         else:
-            target = np.zeros(n_points, dtype=int) if isinstance(val, int) else np.zeros(n_points, dtype=float)
+            # Para bitwise_or, o tipo deve ser int
+            target = np.zeros(n_points, dtype=int) if (isinstance(val, int) or mode == "bitwise_or") else np.zeros(n_points, dtype=float)
 
-    # perform assignment
-    if is_vector:
-        arr_val = np.array(val, dtype=float)
-        target[write_inds] = arr_val
-    else:
-        target[write_inds] = val
+    if len(write_inds) == 0:
+        return
+
+    # Aplicação do valor conforme o modo
+    if mode == "bitwise_or":
+        if is_vector:
+            raise ValueError("O modo 'bitwise_or' só é suportado para campos escalares inteiros.")
+        target = target.astype(int)
+        target[write_inds] = target[write_inds] | int(val)
+
+    elif mode == "keep":
+        if is_vector:
+            mask_empty = np.all(target[write_inds] == 0, axis=-1)
+        else:
+            mask_empty = (target[write_inds] == 0)
+        write_inds_filtered = write_inds[mask_empty]
+        if len(write_inds_filtered) > 0:
+            if is_vector:
+                target[write_inds_filtered] = np.array(val, dtype=float)
+            else:
+                target[write_inds_filtered] = val
+
+    else:  # "overwrite"
+        if is_vector:
+            target[write_inds] = np.array(val, dtype=float)
+        else:
+            target[write_inds] = val
 
     grid.point_data[field] = target
 
 
-def set_region(grid, center, radius, data, shape="circle"):
-
+def set_region(grid, center, radius, data, shape="circle", z_layers=None, mode="overwrite"):
     """Write the values in `data` into grid.point_data for points inside the 2D mask.
 
     - center: (cx, cy) in world distance units
     - radius: scalar radius in world units (applies to the mask generation)
     - data: dict { field_name: value } where value is scalar or list-like (vector)
     - shape: "circle", "square", "diamond" or "concave" (determines mask metric)
+    - z_layers: iterable de índices de fatias Z. Se None, aplica em todo o slab (0 a nz-1).
+    - mode: "overwrite", "bitwise_or" ou "keep"
     """
-
     cx, cy = center
     x_coords = np.asarray(grid.x)
     y_coords = np.asarray(grid.y)
@@ -91,23 +108,27 @@ def set_region(grid, center, radius, data, shape="circle"):
     ny = y_coords.size
     nz = grid.dimensions[2]
 
-    # compute flat indices for all z layers
+    # Delimita quais camadas Z serão afetadas
+    if z_layers is None:
+        target_k = range(nz)
+    else:
+        target_k = [k for k in z_layers if 0 <= k < nz]
+
+    # Compute flat indices
     flat_inds_all = []
-    for k in range(nz):
-        # compute flat indices for this z layer
-        # ravel_multi_index expects tuple of arrays in order (i,j,k) and returns flat indices
+    for k in target_k:
         ks = np.full_like(i_inds, k)
         flat_inds = np.ravel_multi_index((i_inds, j_inds, ks), (nx, ny, nz), order="F")
         flat_inds_all.append(flat_inds)
+
+    if not flat_inds_all:
+        return
     flat_inds_all = np.concatenate(flat_inds_all)
 
-    if len(flat_inds_all) == 0:
-        return
-
     n_points = grid.number_of_points
-    # For each field in data, prepare target array (create if necessary) and assign value(s)
+    # For each field in data, prepare target array and assign value(s)
     for field, val in data.items():
-        _write_field_values(grid, field, val, flat_inds_all, n_points)
+        _write_field_values(grid, field, val, flat_inds_all, n_points, mode=mode)
 
 
 def load_regions_from_file(path):
@@ -144,18 +165,7 @@ def parse_regions_from_cli(region_strings):
 
 
 def validate_region(region, index):
-    """Validate a single region dict. Raises ValueError if invalid.
-
-    Schemas (strict, no defaults):
-      - circle: {shape, cx, cy, r1, r2, <field>: scalar|vector|[scalar|vector, ...]}
-      - square: {shape, cx, cy, r1, r2, <field>: scalar|vector|[scalar|vector, ...]}
-      - diamond: {shape, cx, cy, r1, r2, <field>: scalar|vector|[scalar|vector, ...]}
-      - side: {shape, side, <field>: scalar|vector}
-      - node_ids: {shape, ids, <field>: scalar|vector}
-
-    For circle/square/diamond: field values can be scalar, vector, or list (gradient).
-    For side/node_ids: field values must be scalar or vector (no gradients).
-    """
+    """Validate a single region dict. Raises ValueError if invalid."""
     if "shape" not in region:
         raise ValueError(f"Region {index}: missing required field 'shape'.")
     shape = str(region["shape"]).lower()
@@ -190,11 +200,21 @@ def validate_region(region, index):
             except Exception:
                 raise ValueError(f"Region {index} (shape='node_ids'): ids[{i}] must be an integer.")
 
-    # Determine target fields
-    known = set(required + ["shape"])
+    if "thickness" in region:
+        try:
+            int(region["thickness"])
+        except Exception:
+            raise ValueError(f"Region {index}: 'thickness' deve ser um número inteiro.")
+            
+    if "mode" in region:
+        valid_modes = {"overwrite", "bitwise_or", "keep"}
+        if region["mode"] not in valid_modes:
+            raise ValueError(f"Region {index}: 'mode' inválido ('{region['mode']}'). Escolha entre {valid_modes}.")
+
+    known = set(required + ["shape", "thickness", "mode"])
     target_fields = [k for k in region.keys() if k not in known]
     if not target_fields:
-        raise ValueError(f"Region {index}: no target fields provided (e.g. 'restitution_model' or 'fibers_orientation').")
+        raise ValueError(f"Region {index}: no target fields provided (e.g. 'restitution_model' or 'activation_region').")
 
     # Unified validation for all shapes
     for field in target_fields:
@@ -220,20 +240,17 @@ def _validate_field_value(field, val, shape, region_index):
         if supports_gradient and not contains_nested:
             # All elements are scalar: treat as gradient only if len > 1
             if len(val) == 1:
-                # Single-scalar list: treated as uniform value
                 try:
                     float(val[0])
                 except Exception:
                     raise ValueError(f"Region {region_index}: field '{field}'[0] must be numeric.")
             else:
-                # Gradient: all elements must be numeric
                 for i, elem in enumerate(val):
                     try:
                         float(elem)
                     except Exception:
                         raise ValueError(f"Region {region_index}: field '{field}'[{i}] must be numeric.")
         else:
-            # side/node_ids or nested list: interpreted as uniform vector
             try:
                 for elem in val:
                     float(elem) if not isinstance(elem, (list, tuple, np.ndarray)) else None
@@ -247,16 +264,13 @@ def _validate_field_value(field, val, shape, region_index):
 
 
 def apply_region(grid, region):
-    """Apply a validated region dict to the grid.
-
-    For circle/square/diamond: supports gradients. Single values are applied uniformly;
-    lists form gradients with interpolated radii between r1 and r2.
-    For side: defines region by slab side.
-    For node_ids: defines region by specific nodes.
-    """
+    """Apply a validated region dict to the grid."""
     shape = str(region["shape"]).lower()
-    known = {"shape", "cx", "cy", "r1", "r2", "side", "ids"}
+    known = {"shape", "cx", "cy", "r1", "r2", "side", "ids", "thickness", "mode"}
     targets = {k: region[k] for k in region.keys() if k not in known}
+
+    thickness = region.get("thickness", 1)
+    mode = region.get("mode", "overwrite")
 
     if shape in ("circle", "square", "diamond", "concave"):
         cx = float(region["cx"])
@@ -264,85 +278,59 @@ def apply_region(grid, region):
         center = (cx, cy)
         r1 = float(region["r1"])
         r2 = float(region["r2"])
-        _apply_shape_with_gradient(grid, shape, center, r1, r2, targets)
+        z_layers = range(min(grid.dimensions[2], int(thickness))) if "thickness" in region else None
+        _apply_shape_with_gradient(grid, shape, center, r1, r2, targets, z_layers=z_layers, mode=mode)
+
     elif shape == "side":
         side = str(region["side"]).lower()
-        _apply_side_region(grid, side, targets)
+        _apply_side_region(grid, side, targets, thickness=thickness, mode=mode)
+
     elif shape == "node_ids":
         ids = [int(nid) for nid in region["ids"]]
-        _apply_node_ids_region(grid, ids, targets)
+        _apply_node_ids_region(grid, ids, targets, mode=mode)
 
 
-def _apply_shape_with_gradient(grid, shape, center, r1, r2, targets):
-    """
-    Apply a geometric shape (circle, square, diamond) with optional gradient support.
-
-    Parameters:
-    - grid: pyvista.UnstructuredGrid
-    - shape: "circle", "square", or "diamond"
-    - center: (cx, cy)
-    - r1: inner radius (for gradient start)
-    - r2: outer radius, r1 <= r2 (for gradient end)
-    - targets: dict { field_name: value }
-
-    Behavior:
-    - Scalar: applies uniformly value to entire region.
-    - List: gradient from r1 to r2
-    - If r1==r2, then only the first element is used.
-    - If scalar is provided, applies uniformly using r2.
-    """
+def _apply_shape_with_gradient(grid, shape, center, r1, r2, targets, z_layers=None, mode="overwrite"):
     if r1 > r2:
         raise ValueError("r1 must be less than or equal to r2.")
 
     for field, val in targets.items():
-        # Scalar or r1==r2 (single mask): apply only the first value
         if not isinstance(val, (list, tuple)) or r1 == r2:
             v = val[0] if isinstance(val, (list, tuple)) else val
             data = {field: v}
-            set_region(grid, center=center, radius=r2, data=data, shape=shape)
+            set_region(grid, center=center, radius=r2, data=data, shape=shape, z_layers=z_layers, mode=mode)
         else:
-            # List: gradient from r1 to r2
             n_layers = len(val)
             radii = np.linspace(r1, r2, n_layers)
             for i in range(n_layers - 1, -1, -1):
                 data = {field: val[i]}
-                set_region(grid, center=center, radius=radii[i], data=data, shape=shape)
+                set_region(grid, center=center, radius=radii[i], data=data, shape=shape, z_layers=z_layers, mode=mode)
 
 
-def _apply_side_region(grid, side, targets):
+def _apply_side_region(grid, side, targets, thickness=1, mode="overwrite"):
     """
-    Apply field values to a side (side: north,south,east,west).
-    Uses the same logic as region_by_side from build_slab.
+    Aplica valores aos nós de um dos lados do slab.
+    - thickness: quantidade de camadas de nós de profundidade (default=1).
+    - mode: 'overwrite', 'bitwise_or' ou 'keep'.
     """
-    # Validate side
     if side not in {"north", "south", "east", "west"}:
         raise ValueError("side must be one of: north, south, east, west")
 
     dims = grid.dimensions
     nx, ny, nz = dims
+    thickness = max(1, int(thickness))
 
-    # Map side to region_type and index
     if side == "north":
-        region_type = "row"
-        index_int = ny - 1
-    elif side == "east":
-        region_type = "column"
-        index_int = nx - 1
-    elif side == "west":
-        region_type = "column"
-        index_int = 0
-    else:  # south
-        region_type = "row"
-        index_int = 0
-
-    # Compute node ids
-    if region_type == "row":
-        # y fixed, x varies
-        y_indices = [index_int]
+        y_indices = list(range(max(0, ny - thickness), ny))
         x_indices = list(range(nx))
-    else:  # column
-        # x fixed, y varies
-        x_indices = [index_int]
+    elif side == "south":
+        y_indices = list(range(min(thickness, ny)))
+        x_indices = list(range(nx))
+    elif side == "east":
+        x_indices = list(range(max(0, nx - thickness), nx))
+        y_indices = list(range(ny))
+    else:  # west
+        x_indices = list(range(min(thickness, nx)))
         y_indices = list(range(ny))
 
     z_indices = list(range(nz))
@@ -359,12 +347,11 @@ def _apply_side_region(grid, side, targets):
         return
 
     n_points = grid.number_of_points
-    # write targets to fields
     for field, val in targets.items():
-        _write_field_values(grid, field, val, flat_inds_all, n_points)
+        _write_field_values(grid, field, val, flat_inds_all, n_points, mode=mode)
 
 
-def _apply_node_ids_region(grid, ids, targets):
+def _apply_node_ids_region(grid, ids, targets, mode="overwrite"):
     """
     Apply field values to explicitly specified node IDs.
     """
@@ -373,6 +360,5 @@ def _apply_node_ids_region(grid, ids, targets):
 
     n_points = grid.number_of_points
     write_inds = np.array(ids)
-    # write targets to fields
     for field, val in targets.items():
-        _write_field_values(grid, field, val, write_inds, n_points)
+        _write_field_values(grid, field, val, write_inds, n_points, mode=mode)
