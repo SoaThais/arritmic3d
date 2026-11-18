@@ -29,7 +29,7 @@ SLAB_ARGS = [
 ]
 
 SOLVERS = {
-    # "legacy":          (a3d.PropagationSolverType.LEGACY_HEAP, {}),
+    "legacy":          (a3d.PropagationSolverType.LEGACY_HEAP, {}),
     "fim_eikonal":     (a3d.PropagationSolverType.FIM_EIKONAL, {}),
 }
 

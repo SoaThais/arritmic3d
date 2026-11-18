@@ -1,0 +1,46 @@
+{
+    "APD_MODEL": "config_TenTuscher",
+    "CV_MODEL": "config_TenTuscher",
+
+    "COND_VELOC_TRANSVERSAL_REDUCTION": 0.32,
+
+    "CORRECTION_FACTOR_APD": 1.0,
+    "CORRECTION_FACTOR_CV": 1.0,
+
+    "ELECTROTONIC_EFFECT": 0.0,
+    "INITIAL_APD": 300.0,
+    "MIN_POTENTIAL": 0.0,
+    "SAFETY_FACTOR": 1.0,
+
+    "CV_MEMORY_COEFF": 0.0,
+    "APD_MEMORY_COEFF": 0.0,
+
+    "VTK_OUTPUT_SAVE": true,
+    "VTK_OUTPUT_FORMAT": "vtu",
+
+    "VTK_OUTPUT_FIELDS": [
+        "State",
+        "APD",
+        "DI",
+        "CV",
+        "AP",
+        "LAT",
+        "Beat"
+    ],
+
+    "VTK_OUTPUT_PERIOD": 20.0,
+    "VTK_OUTPUT_INITIAL_TIME": 0.0,
+
+    "SENSORS_OUTPUT_SAVE": true,
+
+    "SIMULATION_DURATION": 1000.0,
+
+    "PROTOCOL": [
+        {
+            "ACTIVATION_REGION": 1,
+            "FIRST_ACTIVATION_TIME": 0,
+            "N_STIMS_PACING": [1],
+            "BCL": [1000]
+        }
+    ]
+}

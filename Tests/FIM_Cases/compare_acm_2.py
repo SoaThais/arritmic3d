@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 def parse_acm_file(filepath, scale_factor=1.0):
+    
     """
     Reads an .acm file and returns a dictionary indexed by coordinates.
     scale_factor: use 1.0 for MonoAlg3D (um -> mm) and 1000.0 for Arritmic3D.

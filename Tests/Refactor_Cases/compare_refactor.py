@@ -31,8 +31,6 @@ O comparador faz duas validações:
 Assim, um PASS não será obtido simplesmente porque o meshio
 ignorou os voxels.
 
-Adição: Inclui o cálculo de Erro Global (considerando todos os frames/VTUs do caso).
-
 Uso:
 
     python compare_refactor.py \
@@ -46,6 +44,20 @@ Ou:
         --candidate ./candidate
 
 para comparar automaticamente todos os casos presentes nos dois diretórios.
+
+Opções:
+
+    --case NOME       compara somente um caso
+    --atol VALOR      tolerância absoluta para floats
+    --rtol VALOR      tolerância relativa para floats
+    --verbose         mostra detalhes adicionais
+    --no-meshio       não faz a etapa meshio
+    --no-raw-cells    não faz a comparação direta das Cells
+    --report PREFIX   prefixo dos relatórios
+
+Dependências:
+    numpy
+    meshio
 """
 
 from __future__ import annotations
@@ -59,8 +71,13 @@ import sys
 import zlib
 from pathlib import Path
 from typing import Any
+
 import numpy as np
-import meshio
+
+try:
+    import meshio
+except ImportError:
+    meshio = None
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +95,11 @@ FLOAT_FIELDS = {
     "LAT",
     "Time",
 }
+
+# INTEGER_FIELDS = {
+#     "State",
+#     "Beat",
+# }
 
 INTEGER_FIELDS = set()
 
@@ -104,6 +126,17 @@ VTK_CELL_TYPES = {
 # ---------------------------------------------------------------------------
 
 def natural_key(path_or_name):
+    """
+    Ordenação natural.
+
+    Exemplo:
+        slab_2.vtu
+        slab_10.vtu
+
+    em vez de:
+        slab_10.vtu
+        slab_2.vtu
+    """
     if isinstance(path_or_name, Path):
         name = path_or_name.name
     else:
@@ -119,6 +152,7 @@ def natural_key(path_or_name):
 
 
 def discover_vtu_files(directory: Path) -> dict[str, Path]:
+    """Retorna {nome_do_arquivo: caminho}."""
     return {
         p.name: p
         for p in sorted(directory.glob("*.vtu"), key=natural_key)
@@ -126,6 +160,12 @@ def discover_vtu_files(directory: Path) -> dict[str, Path]:
 
 
 def find_case_directories(root: Path) -> list[Path]:
+    """
+    Procura diretórios que contenham pelo menos um VTU.
+
+    Se root já contém VTUs, root é considerado um caso.
+    Caso contrário, procura subdiretórios.
+    """
     direct = list(root.glob("*.vtu"))
     if direct:
         return [root]
@@ -147,11 +187,21 @@ def format_number(x: float) -> str:
 # ---------------------------------------------------------------------------
 
 def read_vtu_xml(path: Path):
+    """
+    Lê o XML sem que o ElementTree tente interpretar o conteúdo binário.
+
+    O conteúdo binário está em base64 dentro do XML, portanto é seguro
+    fazer o parse XML normalmente.
+    """
     import xml.etree.ElementTree as ET
+
     return ET.parse(path)
 
 
 def vtk_dtype_from_string(type_name: str):
+    """
+    Converte o tipo VTK para numpy dtype.
+    """
     mapping = {
         "Int8": np.int8,
         "UInt8": np.uint8,
@@ -174,12 +224,14 @@ def vtk_dtype_from_string(type_name: str):
 
 
 def strip_namespace(tag: str) -> str:
+    """Remove namespace XML, se existir."""
     if "}" in tag:
         return tag.split("}", 1)[1]
     return tag
 
 
 def find_child(parent, name: str):
+    """Procura filho ignorando namespace."""
     for child in parent:
         if strip_namespace(child.tag) == name:
             return child
@@ -187,6 +239,7 @@ def find_child(parent, name: str):
 
 
 def find_children(parent, name: str):
+    """Procura filhos ignorando namespace."""
     return [
         child
         for child in parent
@@ -195,6 +248,9 @@ def find_children(parent, name: str):
 
 
 def get_vtu_piece(root):
+    """
+    Retorna o primeiro Piece do UnstructuredGrid.
+    """
     for elem in root.iter():
         if strip_namespace(elem.tag) == "Piece":
             return elem
@@ -203,6 +259,7 @@ def get_vtu_piece(root):
 
 
 def clean_base64_text(text: str) -> str:
+    """Remove whitespace de um conteúdo base64."""
     if text is None:
         raise ValueError("DataArray binário sem conteúdo.")
 
@@ -219,6 +276,31 @@ def decode_vtk_compressed_binary(
     header_type: str,
     byte_order: str,
 ) -> bytes:
+    """
+    Decodifica o formato binário comprimido do VTK XML.
+
+    IMPORTANTE:
+    O VTK XML não necessariamente codifica todo o conteúdo como um único
+    bloco base64. Para vtkZLibDataCompressor, o header comprimido e os
+    dados comprimidos são serializados como segmentos base64 consecutivos.
+
+    Exemplo real do arquivo do usuário:
+
+        AQAAAACAAAAIAAAACwAAAA==eF5jYIAAAAAIAAE=
+
+    O primeiro segmento é o header e o segundo é o bloco zlib.
+
+    Header (UInt32, LittleEndian):
+
+        num_blocks
+        block_size
+        last_block_size
+        compressed_size[0]
+        compressed_size[1]
+        ...
+
+    Depois do header, cada bloco é descomprimido individualmente com zlib.
+    """
     if header_type not in ("UInt32", "UInt64"):
         raise ValueError(
             f"header_type={header_type} não suportado. "
@@ -239,6 +321,9 @@ def decode_vtk_compressed_binary(
     header_size = 4 if header_type == "UInt32" else 8
     header_fmt = endian + ("I" if header_type == "UInt32" else "Q")
 
+    # Primeiro descobrimos num_blocks.
+    # Um UInt32/UInt64 ocupa 4/8 bytes, portanto os primeiros 8/16
+    # caracteres base64 são suficientes para obter o primeiro valor.
     first_value_chars = 8 if header_type == "UInt32" else 12
 
     if len(cleaned) < first_value_chars:
@@ -265,7 +350,14 @@ def decode_vtk_compressed_binary(
     if number_of_blocks == 0:
         return b""
 
+    # O header possui:
+    #   3 valores fixos + number_of_blocks compressed_sizes
     header_bytes_length = header_size * (3 + number_of_blocks)
+
+    # Número de caracteres base64 necessários para representar o header.
+    # O writer do VTK remove os caracteres '=' de padding do segmento
+    # base64 do header, mas eles podem permanecer no XML imediatamente
+    # antes do próximo segmento. Portanto usamos o tamanho SEM padding.
     full_header_chars = (
         (header_bytes_length + 2) // 3
     ) * 4
@@ -286,6 +378,9 @@ def decode_vtk_compressed_binary(
 
     header_b64 = cleaned[:header_chars_length]
     payload_b64 = cleaned[header_chars_length:]
+
+    # O padding removido do final do header pode continuar presente no
+    # conteúdo XML antes do próximo segmento base64.
     payload_b64 = payload_b64.lstrip("=")
 
     try:
@@ -311,18 +406,22 @@ def decode_vtk_compressed_binary(
 
     def read_header_value():
         nonlocal pos
+
         if pos + header_size > len(header_data):
             raise ValueError(
                 "Header VTK terminou inesperadamente."
             )
+
         value = struct.unpack_from(
             header_fmt,
             header_data,
             pos,
         )[0]
+
         pos += header_size
         return value
 
+    # Já lemos number_of_blocks, mas avançamos o cursor normalmente.
     number_of_blocks_header = read_header_value()
 
     if number_of_blocks_header != number_of_blocks:
@@ -339,6 +438,9 @@ def decode_vtk_compressed_binary(
         for _ in range(number_of_blocks)
     ]
 
+    # Depois do header, o VTK usa uma única sequência base64 para os
+    # bytes comprimidos de todos os blocos concatenados. Os limites dos
+    # blocos são dados por compressed_sizes.
     payload_padded = payload_b64 + (
         "=" * ((4 - len(payload_b64) % 4) % 4)
     )
@@ -409,6 +511,16 @@ def decode_vtk_binary_dataarray(
     data_array,
     vtk_root,
 ) -> np.ndarray:
+    """
+    Decodifica um DataArray XML no formato binary.
+
+    Suporta:
+        format="ascii"
+        format="binary"
+
+    O caso binary é o formato observado no VTU do usuário:
+        base64 + vtkZLibDataCompressor.
+    """
     fmt = data_array.attrib.get("format", "ascii")
     vtk_type = data_array.attrib.get("type")
 
@@ -423,7 +535,9 @@ def decode_vtk_binary_dataarray(
 
     if fmt == "ascii":
         text = data_array.text or ""
+
         values = np.fromstring(text, sep=" ", dtype=dtype)
+
         return values
 
     if fmt != "binary":
@@ -456,6 +570,8 @@ def decode_vtk_binary_dataarray(
         )
 
     endian_prefix = "<" if byte_order == "LittleEndian" else ">"
+
+    # numpy dtype pode ser convertido explicitamente para a endianness
     dtype_file = np.dtype(dtype).newbyteorder(endian_prefix)
 
     if len(raw) % dtype_file.itemsize != 0:
@@ -468,16 +584,29 @@ def decode_vtk_binary_dataarray(
 
 
 def get_dataarray_by_name(parent, name: str):
+    """
+    Retorna DataArray com Name=name.
+    """
     for elem in parent.iter():
         if strip_namespace(elem.tag) != "DataArray":
             continue
+
         if elem.attrib.get("Name") == name:
             return elem
+
     return None
 
 
 def get_cells_dataarrays(piece):
+    """
+    Retorna os DataArrays de Cells:
+
+        connectivity
+        offsets
+        types
+    """
     cells = None
+
     for child in piece:
         if strip_namespace(child.tag) == "Cells":
             cells = child
@@ -487,6 +616,7 @@ def get_cells_dataarrays(piece):
         raise ValueError("VTU sem <Cells>.")
 
     result = {}
+
     for da in find_children(cells, "DataArray"):
         name = da.attrib.get("Name")
         if name in {"connectivity", "offsets", "types"}:
@@ -504,12 +634,19 @@ def get_cells_dataarrays(piece):
 
 
 def load_raw_cells(path: Path) -> dict[str, np.ndarray]:
+    """
+    Lê diretamente connectivity/offsets/types do VTU.
+
+    Esta é a parte que contorna o problema do meshio com VTK_VOXEL (11).
+    """
     tree = read_vtu_xml(path)
     root = tree.getroot()
     piece = get_vtu_piece(root)
+
     arrays = get_cells_dataarrays(piece)
 
     result = {}
+
     for name, data_array in arrays.items():
         result[name] = decode_vtk_binary_dataarray(
             data_array,
@@ -530,6 +667,9 @@ def compare_arrays(
     rtol: float,
     integer: bool = False,
 ) -> dict[str, Any]:
+    """
+    Compara dois arrays e retorna estatísticas.
+    """
     ref = np.asarray(reference)
     cand = np.asarray(candidate)
 
@@ -543,9 +683,6 @@ def compare_arrays(
         "mean_abs_error": None,
         "rmse": None,
         "max_relative_error": None,
-        "sum_abs_error": 0.0,
-        "sum_sq_error": 0.0,
-        "total_elements": int(ref.size)
     }
 
     if ref.shape != cand.shape:
@@ -563,15 +700,30 @@ def compare_arrays(
     if integer:
         equal = ref == cand
         different = ~equal
-        abs_error = np.abs(ref.astype(np.int64) - cand.astype(np.int64))
 
         result["count_different"] = int(np.count_nonzero(different))
-        result["max_abs_error"] = float(np.max(abs_error)) if np.any(different) else 0.0
-        result["mean_abs_error"] = float(np.mean(abs_error)) if np.any(different) else 0.0
-        result["rmse"] = float(np.sqrt(np.mean(abs_error.astype(np.float64) ** 2)))
+        result["max_abs_error"] = (
+            float(np.max(np.abs(
+                ref.astype(np.int64) - cand.astype(np.int64)
+            )))
+            if np.any(different)
+            else 0.0
+        )
+        result["mean_abs_error"] = (
+            float(np.mean(np.abs(
+                ref.astype(np.int64) - cand.astype(np.int64)
+            )))
+            if np.any(different)
+            else 0.0
+        )
+
+        result["rmse"] = (
+            float(np.sqrt(np.mean(
+                (ref.astype(np.float64) - cand.astype(np.float64)) ** 2
+            )))
+        )
+
         result["max_relative_error"] = 0.0
-        result["sum_abs_error"] = float(np.sum(abs_error))
-        result["sum_sq_error"] = float(np.sum(abs_error.astype(np.float64) ** 2))
         result["pass"] = bool(np.all(equal))
 
         return result
@@ -588,17 +740,18 @@ def compare_arrays(
     )
 
     different = ~equal
+
     abs_error = np.abs(ref_float - cand_float)
 
     result["count_different"] = int(np.count_nonzero(different))
     result["max_abs_error"] = float(np.max(abs_error))
     result["mean_abs_error"] = float(np.mean(abs_error))
-    result["rmse"] = float(np.sqrt(np.mean(abs_error ** 2)))
-    
-    result["sum_abs_error"] = float(np.sum(abs_error))
-    result["sum_sq_error"] = float(np.sum(abs_error ** 2))
+    result["rmse"] = float(
+        np.sqrt(np.mean((ref_float - cand_float) ** 2))
+    )
 
     denominator = np.maximum(np.abs(ref_float), atol)
+
     relative_error = abs_error / denominator
     result["max_relative_error"] = float(np.max(relative_error))
 
@@ -617,6 +770,11 @@ def compare_raw_cells(
     atol: float,
     rtol: float,
 ) -> dict[str, Any]:
+    """
+    Compara diretamente os arrays de Cells.
+
+    Isso inclui VTK_VOXEL (tipo 11), que pode ser ignorado pelo meshio.
+    """
     ref = load_raw_cells(reference_file)
     cand = load_raw_cells(candidate_file)
 
@@ -627,6 +785,7 @@ def compare_raw_cells(
         "cell_type_counts_candidate": {},
     }
 
+    # connectivity e offsets são inteiros
     for name in ("connectivity", "offsets"):
         cmp = compare_arrays(
             ref[name],
@@ -635,10 +794,13 @@ def compare_raw_cells(
             rtol=rtol,
             integer=True,
         )
+
         result["arrays"][name] = cmp
+
         if not cmp["pass"]:
             result["pass"] = False
 
+    # types
     cmp = compare_arrays(
         ref["types"],
         cand["types"],
@@ -646,14 +808,18 @@ def compare_raw_cells(
         rtol=rtol,
         integer=True,
     )
+
     result["arrays"]["types"] = cmp
+
     if not cmp["pass"]:
         result["pass"] = False
 
+    # Contagem por tipo
     ref_types, ref_counts = np.unique(
         ref["types"].astype(np.int64),
         return_counts=True,
     )
+
     cand_types, cand_counts = np.unique(
         cand["types"].astype(np.int64),
         return_counts=True,
@@ -677,7 +843,13 @@ def compare_raw_cells(
 # ---------------------------------------------------------------------------
 
 def normalize_meshio_cells(mesh):
+    """
+    Retorna um dicionário {cell_type: connectivity}.
+
+    Compatível com versões diferentes do meshio.
+    """
     result = {}
+
     if hasattr(mesh, "cells_dict"):
         for key, value in mesh.cells_dict.items():
             result[key] = np.asarray(value)
@@ -702,6 +874,13 @@ def compare_meshio(
     atol: float,
     rtol: float,
 ) -> dict[str, Any]:
+    """
+    Comparação usando meshio.
+
+    Observação:
+        meshio pode emitir warning para VTK_VOXEL (11).
+        Por isso essa comparação NÃO substitui compare_raw_cells().
+    """
     if meshio is None:
         return {
             "pass": None,
@@ -730,6 +909,7 @@ def compare_meshio(
             "error": f"meshio.read falhou: {exc}",
         }
 
+    # Points
     cmp = compare_arrays(
         np.asarray(ref.points),
         np.asarray(cand.points),
@@ -737,10 +917,13 @@ def compare_meshio(
         rtol=rtol,
         integer=False,
     )
+
     result["points"] = cmp
+
     if not cmp["pass"]:
         result["pass"] = False
 
+    # Cells reconhecidas pelo meshio
     ref_cells = normalize_meshio_cells(ref)
     cand_cells = normalize_meshio_cells(cand)
 
@@ -755,7 +938,9 @@ def compare_meshio(
         result["cells"]["pass"] = False
         result["pass"] = False
 
-    for cell_type in sorted(set(ref_cells.keys()) | set(cand_cells.keys())):
+    for cell_type in sorted(
+        set(ref_cells.keys()) | set(cand_cells.keys())
+    ):
         if cell_type not in ref_cells or cell_type not in cand_cells:
             result["cells"]["per_type"][cell_type] = {
                 "pass": False,
@@ -770,16 +955,31 @@ def compare_meshio(
             rtol=rtol,
             integer=True,
         )
+
         result["cells"]["per_type"][cell_type] = cmp
+
         if not cmp["pass"]:
             result["cells"]["pass"] = False
             result["pass"] = False
 
-    ref_pd = {str(k): np.asarray(v) for k, v in ref.point_data.items()}
-    cand_pd = {str(k): np.asarray(v) for k, v in cand.point_data.items()}
+    # PointData
+    ref_pd = {
+        str(k): np.asarray(v)
+        for k, v in ref.point_data.items()
+    }
+
+    cand_pd = {
+        str(k): np.asarray(v)
+        for k, v in cand.point_data.items()
+    }
+
     all_pd = sorted(set(ref_pd) | set(cand_pd))
 
     for name in all_pd:
+
+        # State e Beat são ignorados na regressão porque,
+        # após a separação do solver, sua representação pode
+        # diferir enquanto a fisiologia/propagação permanece igual.
         if name in {"State", "Beat"}:
             continue
 
@@ -798,13 +998,26 @@ def compare_meshio(
             rtol=rtol,
             integer=False,
         )
+
         result["point_data"][name] = cmp
+
         if not cmp["pass"]:
             result["pass"] = False
 
+    # CellData
+    # meshio pode organizar CellData de forma diferente entre versões.
+    # Fazemos a comparação apenas quando disponível de maneira clara.
     try:
-        ref_cd = {str(k): np.asarray(v) for k, v in ref.cell_data.items()}
-        cand_cd = {str(k): np.asarray(v) for k, v in cand.cell_data.items()}
+        ref_cd = {
+            str(k): np.asarray(v)
+            for k, v in ref.cell_data.items()
+        }
+
+        cand_cd = {
+            str(k): np.asarray(v)
+            for k, v in cand.cell_data.items()
+        }
+
         all_cd = sorted(set(ref_cd) | set(cand_cd))
 
         for name in all_cd:
@@ -823,7 +1036,9 @@ def compare_meshio(
                 rtol=rtol,
                 integer=name in INTEGER_FIELDS,
             )
+
             result["cell_data"][name] = cmp
+
             if not cmp["pass"]:
                 result["pass"] = False
 
@@ -853,20 +1068,38 @@ def print_array_result(name: str, result: dict[str, Any], indent="       "):
     print(f"{indent}{name:<14} FAIL")
 
     if "count_different" in result:
-        print(f"{indent}  diferenças: {result['count_different']}")
+        print(
+            f"{indent}  diferenças: "
+            f"{result['count_different']}"
+        )
 
     if result.get("max_abs_error") is not None:
-        print(f"{indent}  max abs:    {format_number(result['max_abs_error'])}")
+        print(
+            f"{indent}  max abs:    "
+            f"{format_number(result['max_abs_error'])}"
+        )
 
     if result.get("rmse") is not None:
-        print(f"{indent}  RMSE:       {format_number(result['rmse'])}")
+        print(
+            f"{indent}  RMSE:       "
+            f"{format_number(result['rmse'])}"
+        )
 
     if result.get("max_relative_error") is not None:
-        print(f"{indent}  max rel:    {format_number(result['max_relative_error'])}")
+        print(
+            f"{indent}  max rel:    "
+            f"{format_number(result['max_relative_error'])}"
+        )
 
     if not result.get("shape_equal", True):
-        print(f"{indent}  shape ref:  {result.get('shape_reference')}")
-        print(f"{indent}  shape cand: {result.get('shape_candidate')}")
+        print(
+            f"{indent}  shape ref:  "
+            f"{result.get('shape_reference')}"
+        )
+        print(
+            f"{indent}  shape cand: "
+            f"{result.get('shape_candidate')}"
+        )
 
 
 def print_raw_cells_result(result: dict[str, Any]):
@@ -878,7 +1111,11 @@ def print_raw_cells_result(result: dict[str, Any]):
         print("FAIL")
 
     for name in ("connectivity", "offsets", "types"):
-        print_array_result(f"raw/{name}", result["arrays"][name], indent="         ")
+        print_array_result(
+            f"raw/{name}",
+            result["arrays"][name],
+            indent="         ",
+        )
 
     ref_counts = result["cell_type_counts_reference"]
     cand_counts = result["cell_type_counts_candidate"]
@@ -887,14 +1124,23 @@ def print_raw_cells_result(result: dict[str, Any]):
     print(f"           reference: {ref_counts}")
     print(f"           candidate: {cand_counts}")
 
+    # Destaque especial para VTK_VOXEL
     ref_voxel = ref_counts.get("VOXEL", 0)
     cand_voxel = cand_counts.get("VOXEL", 0)
-    print(f"           VTK_VOXEL(11): reference={ref_voxel}, candidate={cand_voxel}")
+
+    print(
+        f"           VTK_VOXEL(11): "
+        f"reference={ref_voxel}, "
+        f"candidate={cand_voxel}"
+    )
 
 
 def print_meshio_result(result: dict[str, Any]):
     if result.get("skipped"):
-        print(f"       meshio        SKIP ({result.get('reason', '')})")
+        print(
+            "       meshio        SKIP "
+            f"({result.get('reason', '')})"
+        )
         return
 
     if "error" in result:
@@ -902,47 +1148,42 @@ def print_meshio_result(result: dict[str, Any]):
         print(f"         {result['error']}")
         return
 
-    print("       meshio        " + ("PASS" if result["pass"] else "FAIL"))
-    print_array_result("points", result["points"], indent="         ")
+    print(
+        "       meshio        "
+        + ("PASS" if result["pass"] else "FAIL")
+    )
+
+    print_array_result(
+        "points",
+        result["points"],
+        indent="         ",
+    )
 
     cells = result["cells"]
-    print("         cells       " + ("PASS" if cells["pass"] else "FAIL"))
+
+    print(
+        "         cells       "
+        + ("PASS" if cells["pass"] else "FAIL")
+    )
+
     for cell_type, cmp in cells["per_type"].items():
-        print_array_result(f"cells/{cell_type}", cmp, indent="           ")
+        print_array_result(
+            f"cells/{cell_type}",
+            cmp,
+            indent="           ",
+        )
 
     for name, cmp in result["point_data"].items():
-        print_array_result(f"PointData/{name}", cmp, indent="         ")
+        print_array_result(
+            f"PointData/{name}",
+            cmp,
+            indent="         ",
+        )
 
 
 # ---------------------------------------------------------------------------
-# Arquivo e Agregação Global
+# Arquivo
 # ---------------------------------------------------------------------------
-
-def extract_array_comparisons(file_res: dict[str, Any]) -> dict[str, Any]:
-    """Utilitário para extrair todos os dicionários de comparação de um arquivo."""
-    comps = {}
-    
-    if file_res.get("meshio") and not file_res["meshio"].get("skipped"):
-        m = file_res["meshio"]
-        if "points" in m and m["points"] and "pass" in m["points"]:
-            comps["meshio/points"] = m["points"]
-            
-        for k, cmp in m.get("point_data", {}).items():
-            if "pass" in cmp: comps[f"meshio/PointData/{k}"] = cmp
-            
-        for k, cmp in m.get("cell_data", {}).items():
-            if "pass" in cmp: comps[f"meshio/CellData/{k}"] = cmp
-            
-        for k, cmp in m.get("cells", {}).get("per_type", {}).items():
-            if "pass" in cmp: comps[f"meshio/cells/{k}"] = cmp
-            
-    if file_res.get("raw_cells") and not file_res["raw_cells"].get("skipped") and "error" not in file_res["raw_cells"]:
-        r = file_res["raw_cells"]
-        for k, cmp in r.get("arrays", {}).items():
-            if "pass" in cmp: comps[f"raw_cells/{k}"] = cmp
-            
-    return comps
-
 
 def compare_file(
     reference_file: Path,
@@ -989,7 +1230,7 @@ def print_file_result(result: dict[str, Any]):
             print(f"         erro: {raw_result['error']}")
         else:
             print_raw_cells_result(raw_result)
-    print("       RESULTADO     " + ("PASS" if result["pass"] else "FAIL"))
+    print("       RESULTADO     FAIL")
 
 
 # ---------------------------------------------------------------------------
@@ -1014,9 +1255,20 @@ def compare_case(
     ref_files = discover_vtu_files(reference_dir)
     cand_files = discover_vtu_files(candidate_dir)
 
-    common = sorted(set(ref_files) & set(cand_files), key=natural_key)
-    only_ref = sorted(set(ref_files) - set(cand_files), key=natural_key)
-    only_cand = sorted(set(cand_files) - set(ref_files), key=natural_key)
+    common = sorted(
+        set(ref_files) & set(cand_files),
+        key=natural_key,
+    )
+
+    only_ref = sorted(
+        set(ref_files) - set(cand_files),
+        key=natural_key,
+    )
+
+    only_cand = sorted(
+        set(cand_files) - set(ref_files),
+        key=natural_key,
+    )
 
     print(f"Arquivos reference: {len(ref_files)}")
     print(f"Arquivos candidate: {len(cand_files)}")
@@ -1040,11 +1292,9 @@ def compare_case(
             "files": [],
             "only_reference": only_ref,
             "only_candidate": only_cand,
-            "global_metrics": {}
         }
 
     results = []
-    global_metrics = {}
 
     for name in common:
         result = compare_file(
@@ -1061,52 +1311,14 @@ def compare_case(
         if not result["pass"]:
             print()
             print_file_result(result)
-            
-        # Acumular estatísticas para cálculo de erro global
-        for path, cmp in extract_array_comparisons(result).items():
-            if "total_elements" not in cmp or cmp.get("skipped"): continue
-            
-            if path not in global_metrics:
-                global_metrics[path] = {
-                    "max_abs_error": 0.0,
-                    "sum_abs_error": 0.0,
-                    "sum_sq_error": 0.0,
-                    "total_elements": 0,
-                    "count_different": 0,
-                }
-            
-            gm = global_metrics[path]
-            gm["max_abs_error"] = max(gm["max_abs_error"], cmp.get("max_abs_error", 0.0))
-            gm["sum_abs_error"] += cmp.get("sum_abs_error", 0.0)
-            gm["sum_sq_error"] += cmp.get("sum_sq_error", 0.0)
-            gm["total_elements"] += cmp.get("total_elements", 0)
-            gm["count_different"] += cmp.get("count_different", 0)
-
-    # Computar RMSE e Mean Abs Error globais
-    for path, gm in global_metrics.items():
-        if gm["total_elements"] > 0:
-            gm["mean_abs_error"] = gm["sum_abs_error"] / gm["total_elements"]
-            gm["rmse"] = np.sqrt(gm["sum_sq_error"] / gm["total_elements"])
-        else:
-            gm["mean_abs_error"] = 0.0
-            gm["rmse"] = 0.0
 
     passed = sum(r["pass"] for r in results)
     total = len(results)
-    overall_pass = (total > 0 and passed == total)
 
-    print("\n--- ERRO GLOBAL (AGREGADO TODOS OS FRAMES) ---")
-    for path, gm in global_metrics.items():
-        if gm["count_different"] > 0:
-            print(f"  {path}:")
-            print(f"    max abs global:  {format_number(gm['max_abs_error'])}")
-            print(f"    mean abs global: {format_number(gm['mean_abs_error'])}")
-            print(f"    RMSE global:     {format_number(gm['rmse'])}")
-            print(f"    diffs totais:    {gm['count_different']} de {gm['total_elements']} elementos")
-        else:
-            # Não imprime verboso os que estão perfeitos, a menos que se queira.
-            if verbose:
-                print(f"  {path}: PASS (0 diferenças em {gm['total_elements']} elementos)")
+    overall_pass = (
+        total > 0
+        and passed == total
+    )
 
     print()
     print("-" * 78)
@@ -1121,7 +1333,6 @@ def compare_case(
         "case": reference_dir.name,
         "pass": overall_pass,
         "files": results,
-        "global_metrics": global_metrics,
         "only_reference": only_ref,
         "only_candidate": only_cand,
     }
@@ -1136,6 +1347,17 @@ def choose_cases(
     candidate_root: Path,
     case_name: str | None,
 ):
+    """
+    Identifica os casos a comparar.
+
+    Cenário A:
+        reference_root/03_S1S2/*.vtu
+        candidate_root/03_S1S2/*.vtu
+
+    Cenário B:
+        reference_root/*.vtu
+        candidate_root/*.vtu
+    """
     ref_direct = any(reference_root.glob("*.vtu"))
     cand_direct = any(candidate_root.glob("*.vtu"))
 
@@ -1144,6 +1366,7 @@ def choose_cases(
             raise RuntimeError(
                 "Um dos diretórios contém VTU diretamente e o outro não."
             )
+
         return [(reference_root, candidate_root)]
 
     ref_cases = {
@@ -1158,12 +1381,21 @@ def choose_cases(
 
     if case_name:
         if case_name not in ref_cases:
-            raise RuntimeError(f"Caso '{case_name}' não encontrado na reference.")
+            raise RuntimeError(
+                f"Caso '{case_name}' não encontrado na reference."
+            )
+
         if case_name not in cand_cases:
-            raise RuntimeError(f"Caso '{case_name}' não encontrado na candidate.")
+            raise RuntimeError(
+                f"Caso '{case_name}' não encontrado na candidate."
+            )
+
         return [(ref_cases[case_name], cand_cases[case_name])]
 
-    common = sorted(set(ref_cases) & set(cand_cases), key=natural_key)
+    common = sorted(
+        set(ref_cases) & set(cand_cases),
+        key=natural_key,
+    )
 
     return [
         (ref_cases[name], cand_cases[name])
@@ -1177,17 +1409,73 @@ def choose_cases(
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Compara resultados VTU do Arritmic3D, incluindo Cells binárias comprimidas."
+        description=(
+            "Compara resultados VTU do Arritmic3D, "
+            "incluindo Cells binárias comprimidas."
+        )
     )
-    parser.add_argument("--reference", required=True, type=Path, help="Diretório com resultados de referência.")
-    parser.add_argument("--candidate", required=True, type=Path, help="Diretório com resultados do código novo.")
-    parser.add_argument("--case", default=None, help="Compara somente este caso.")
-    parser.add_argument("--atol", type=float, default=DEFAULT_ATOL, help=f"Tolerância absoluta (default={DEFAULT_ATOL}).")
-    parser.add_argument("--rtol", type=float, default=DEFAULT_RTOL, help=f"Tolerância relativa (default={DEFAULT_RTOL}).")
-    parser.add_argument("--no-meshio", action="store_true", help="Desabilita a comparação via meshio.")
-    parser.add_argument("--no-raw-cells", action="store_true", help="Desabilita a comparação direta das Cells.")
-    parser.add_argument("--verbose", action="store_true", help="Mostra informações adicionais.")
-    parser.add_argument("--report", type=Path, default=None, help="Prefixo do relatório. Ex.: --report comparison")
+
+    parser.add_argument(
+        "--reference",
+        required=True,
+        type=Path,
+        help="Diretório com resultados de referência.",
+    )
+
+    parser.add_argument(
+        "--candidate",
+        required=True,
+        type=Path,
+        help="Diretório com resultados do código novo.",
+    )
+
+    parser.add_argument(
+        "--case",
+        default=None,
+        help="Compara somente este caso.",
+    )
+
+    parser.add_argument(
+        "--atol",
+        type=float,
+        default=DEFAULT_ATOL,
+        help=f"Tolerância absoluta (default={DEFAULT_ATOL}).",
+    )
+
+    parser.add_argument(
+        "--rtol",
+        type=float,
+        default=DEFAULT_RTOL,
+        help=f"Tolerância relativa (default={DEFAULT_RTOL}).",
+    )
+
+    parser.add_argument(
+        "--no-meshio",
+        action="store_true",
+        help="Desabilita a comparação via meshio.",
+    )
+
+    parser.add_argument(
+        "--no-raw-cells",
+        action="store_true",
+        help="Desabilita a comparação direta das Cells.",
+    )
+
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Mostra informações adicionais.",
+    )
+
+    parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help=(
+            "Prefixo do relatório. "
+            "Ex.: --report comparison"
+        ),
+    )
 
     return parser.parse_args()
 
@@ -1196,21 +1484,34 @@ def main():
     args = parse_args()
 
     if not args.reference.exists():
-        print(f"ERRO: reference não existe: {args.reference}", file=sys.stderr)
+        print(
+            f"ERRO: reference não existe: {args.reference}",
+            file=sys.stderr,
+        )
         return 2
 
     if not args.candidate.exists():
-        print(f"ERRO: candidate não existe: {args.candidate}", file=sys.stderr)
+        print(
+            f"ERRO: candidate não existe: {args.candidate}",
+            file=sys.stderr,
+        )
         return 2
 
     try:
-        cases = choose_cases(args.reference, args.candidate, args.case)
+        cases = choose_cases(
+            args.reference,
+            args.candidate,
+            args.case,
+        )
     except Exception as exc:
         print(f"ERRO: {exc}", file=sys.stderr)
         return 2
 
     if not cases:
-        print("ERRO: nenhum caso em comum foi encontrado.", file=sys.stderr)
+        print(
+            "ERRO: nenhum caso em comum foi encontrado.",
+            file=sys.stderr,
+        )
         return 2
 
     all_results = []
@@ -1242,7 +1543,10 @@ def main():
     print("=" * 78)
 
     for result in all_results:
-        print(f"{result['case']:<30} " + ("PASS" if result["pass"] else "FAIL"))
+        print(
+            f"{result['case']:<30} "
+            + ("PASS" if result["pass"] else "FAIL")
+        )
 
     print("=" * 78)
 
@@ -1252,19 +1556,19 @@ def main():
         print("RESULTADO FINAL: FAIL")
 
     # -----------------------------------------------------------------------
-    # JSON & TXT Export
+    # JSON
     # -----------------------------------------------------------------------
 
-    if args.report:
-        json_data = {
-            "reference": str(args.reference),
-            "candidate": str(args.candidate),
-            "atol": args.atol,
-            "rtol": args.rtol,
-            "cases": all_results,
-            "pass": all_pass,
-        }
+    json_data = {
+        "reference": str(args.reference),
+        "candidate": str(args.candidate),
+        "atol": args.atol,
+        "rtol": args.rtol,
+        "cases": all_results,
+        "pass": all_pass,
+    }
 
+    if args.report:
         report_prefix = args.report
 
         if report_prefix.suffix:
@@ -1273,12 +1577,29 @@ def main():
         json_file = report_prefix.with_suffix(".json")
         txt_file = report_prefix.with_suffix(".txt")
 
-        json_file.parent.mkdir(parents=True, exist_ok=True)
+        json_file.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
-        with open(json_file, "w", encoding="utf-8") as f:
-            json.dump(json_data, f, indent=2, ensure_ascii=False)
+        with open(
+            json_file,
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump(
+                json_data,
+                f,
+                indent=2,
+                ensure_ascii=False,
+            )
 
-        with open(txt_file, "w", encoding="utf-8") as f:
+        # Relatório textual simples
+        with open(
+            txt_file,
+            "w",
+            encoding="utf-8",
+        ) as f:
             f.write("=" * 78 + "\n")
             f.write("ARRITMIC3D REGRESSION REPORT\n")
             f.write("=" * 78 + "\n\n")
@@ -1289,32 +1610,23 @@ def main():
             f.write(f"RTOL: {args.rtol}\n\n")
 
             for case in all_results:
-                f.write(f"CASO: {case['case']} - {'PASS' if case['pass'] else 'FAIL'}\n")
-                
-                # Report global
-                gm = case.get("global_metrics", {})
-                f.write("  MÉTRICAS GLOBAIS (TODOS OS FRAMES):\n")
-                has_global_errors = False
-                for path, stats in gm.items():
-                    if stats.get("count_different", 0) > 0:
-                        has_global_errors = True
-                        f.write(f"    - {path}:\n")
-                        f.write(f"        max abs global:  {format_number(stats['max_abs_error'])}\n")
-                        f.write(f"        mean abs global: {format_number(stats['mean_abs_error'])}\n")
-                        f.write(f"        RMSE global:     {format_number(stats['rmse'])}\n")
-                        f.write(f"        diffs totais:    {stats['count_different']} / {stats['total_elements']}\n")
-                
-                if not has_global_errors:
-                    f.write("    (Nenhuma diferença encontrada ao longo de todos os frames)\n")
-                
-                f.write("\n  ARQUIVOS (FALHAS):\n")
-                for file_result in case["files"]:
-                    if not file_result["pass"]:
-                        f.write(f"    {file_result['file']}: FAIL\n")
-                
-                f.write("\n" + "-"*40 + "\n\n")
+                f.write(
+                    f"CASO: {case['case']} - "
+                    f"{'PASS' if case['pass'] else 'FAIL'}\n"
+                )
 
-            f.write("RESULTADO FINAL: " + ("PASS" if all_pass else "FAIL") + "\n")
+                for file_result in case["files"]:
+                    f.write(
+                        f"  {file_result['file']}: "
+                        f"{'PASS' if file_result['pass'] else 'FAIL'}\n"
+                    )
+
+            f.write("\n")
+            f.write(
+                "RESULTADO FINAL: "
+                + ("PASS" if all_pass else "FAIL")
+                + "\n"
+            )
 
         print()
         print(f"Relatório JSON: {json_file}")
